@@ -71,8 +71,17 @@ class Model {
   find(id) { return this.sessions.find((s) => s.id === id); }
   transcripts() {
     const out = {};
+    // 기록 파일 위치를 모르는 세션은 같은 폴더의 다른 세션 기록 위치에서 "<세션ID>.jsonl" 로 찾는다
+    const dirByFolder = {};
+    for (const s of this.sessions) if (s.transcriptPath && !dirByFolder[s.folder]) dirByFolder[s.folder] = path.dirname(s.transcriptPath);
+    const guessDir = (cwd) => path.join(os.homedir(), '.claude', 'projects', String(cwd || '').replace(/[^A-Za-z0-9]/g, '-'));
     for (const s of this.sessions) {
-      const info = scanTranscript(s.transcriptPath);
+      let p = s.transcriptPath;
+      if (!p || !fs.existsSync(p)) {
+        const cands = [dirByFolder[s.folder], guessDir(s.cwd)].filter(Boolean).map((d) => path.join(d, `${s.id}.jsonl`));
+        p = cands.find((c) => fs.existsSync(c));
+      }
+      const info = scanTranscript(p);
       if (info) out[s.id] = info;
     }
     return out;

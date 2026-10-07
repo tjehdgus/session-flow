@@ -6,6 +6,9 @@ const path = require('path');
 
 const LIVE_WINDOW_MS = 10 * 60 * 1000;
 const QUIET_KINDS = new Set(['session_start', 'session_end', 'stop']);
+// 사람이 친 질문이 아니라 IDE/시스템이 자동으로 넣는 프롬프트 (세션 제목으로 쓰지 않음)
+const AUTO_PROMPT = /^\s*(<|continue from where you left off|continue\.?$|resume\b|\[request interrupted)/i;
+const isHumanPrompt = (e) => e.kind === 'prompt' && !e.agent_id && !AUTO_PROMPT.test(e.summary || '');
 
 // 다른 세션에서 온 메시지가 프롬프트로 들어온 형태를 해석한다.
 //   <cross-session-message from="uds:...">본문</cross-session-message>
@@ -69,7 +72,7 @@ function buildSessions(events, now = Date.now(), roots = []) {
     s.start = Math.min(s.start, e._t);
     s.end = Math.max(s.end, e._t);
     // <task-notification>, <command-name> 같은 시스템이 넣은 프롬프트는 제목으로 쓰지 않는다
-    if (!s.title && e.kind === 'prompt' && !e.agent_id && !/^\s*</.test(e.summary || '')) s.title = e.summary;
+    if (!s.title && isHumanPrompt(e)) s.title = e.summary;
     if (e.transcript_path && !e.agent_id) s.transcriptPath = e.transcript_path;
     if (e.kind === 'session_end') s.ended = true;
 
@@ -378,7 +381,7 @@ function pickCandidates(allSessions, folder, { names = {}, transcripts = {}, sel
     .filter((s) => s.folder === folder && (s.activity > 0 || (selected && selected.has(s.id))))
     .map((s) => {
       const tr = transcripts[s.id] || {};
-      const first = s.events.find((e) => e.kind === 'prompt' && !e.agent_id && !/^\s*</.test(e.summary || ''));
+      const first = s.events.find(isHumanPrompt);
       const recent = s.events.filter((e) => !QUIET_KINDS.has(e.kind) && !e.agent_id).slice(-3).reverse()
         .map((e) => e.kind === 'tool' ? `${e.tool} ${e.file ? e.file.split(/[\\/]/).pop() : (e.summary || '')}` : e.kind === 'message' ? `✉ 보냄: ${e.summary || ''}` : e.kind === 'message_in' ? `✉ 받음: ${e.summary || ''}` : (e.summary || e.kind));
       return {
