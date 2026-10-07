@@ -101,18 +101,32 @@ function handle(h) {
   const input = h.tool_input || {};
   const out = [];
 
+  // transcript_path 는 세션 제목·받은 메시지를 읽는 데 쓰인다 (이벤트마다 넣지 않고 일부에만)
+  const tp = h.transcript_path || undefined;
+
   switch (ev) {
     case 'SessionStart':
-      out.push({ ...base(h), kind: 'session_start', summary: h.source || '' });
+      out.push({ ...base(h), kind: 'session_start', summary: h.source || '', transcript_path: tp });
       break;
     case 'SessionEnd':
       out.push({ ...base(h), kind: 'session_end', summary: h.reason || '' });
       break;
-    case 'UserPromptSubmit':
-      out.push({ ...base(h), kind: 'prompt', summary: truncate(h.prompt, 120), detail: truncate(h.prompt) });
+    case 'UserPromptSubmit': {
+      const p = String(h.prompt || '');
+      // 다른 세션에서 온 메시지가 프롬프트로 들어온 경우
+      //   <cross-session-message from="...">본문</cross-session-message>  /  Message from @handle: 본문
+      const m = /<cross-session-message\b[^>]*?\bfrom\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)(?:<\/cross-session-message>|$)/.exec(p)
+        || /Message from @([A-Za-z0-9_.:/-]+)[^:\n]{0,80}?:\s*([\s\S]*)/.exec(p);
+      if (m) {
+        const body = m[2].trim();
+        out.push({ ...base(h), kind: 'message_in', target: m[1], summary: truncate(body, 120), detail: truncate(body), transcript_path: tp });
+      } else {
+        out.push({ ...base(h), kind: 'prompt', summary: truncate(p, 120), detail: truncate(p), transcript_path: tp });
+      }
       break;
+    }
     case 'Stop':
-      out.push({ ...base(h), kind: 'stop' });
+      out.push({ ...base(h), kind: 'stop', transcript_path: tp });
       break;
     case 'SubagentStart':
       out.push({ ...base(h), kind: 'subagent_start', summary: h.agent_type || '' });

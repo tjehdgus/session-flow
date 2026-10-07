@@ -1,12 +1,25 @@
 # Session Flow
 
-Claude Code 세션이 어떻게 움직였는지(메인 ↔ 서브에이전트 위임, 툴 호출, 파일 수정)를 기록하고, VS Code / Antigravity 안에서 타임라인과 전/후 diff로 보는 도구입니다. 서버 없이 로컬 파일만 씁니다.
+한 작업 폴더에서 여러 Claude Code 세션이 서로 어떻게 메시지를 주고받는지 **그래프**로 보고, 각 세션이 한 일(툴 호출, 서브에이전트 위임, 파일 수정 전/후 diff)을 VS Code / Antigravity 안에서 확인하는 도구입니다. 서버 없이 로컬 파일만 씁니다.
 
 ```
 Claude Code ──hook──▶ ~/.session-flow/events.jsonl + snapshots/
                                    │
-VS Code 확장 ──파일 감시───────────┘──▶ 사이드바 트리 · 타임라인 · diff
+VS Code 확장 ──파일 감시───────────┘──▶ 폴더별 세션 그래프 · 타임라인 · diff
 ```
+
+## 화면
+
+- **사이드바**: 작업 폴더(플로우) → 세션 → 에이전트 → 이벤트. 폴더를 누르면 그 폴더의 세션 그래프가 열립니다.
+- **세션 그래프**: 점 격자 캔버스에 세션이 노드로 놓이고, 세션끼리 주고받은 메시지가 방향별 화살표(왕복이면 두 줄)로 이어집니다. 숫자는 메시지 수, 흐르는 점선은 방금 오간 메시지. 화살표를 누르면 주고받은 내용, 노드를 누르면 그 세션의 최근 작업이 오른쪽에 나옵니다. 노드는 드래그로 옮길 수 있고 위치는 저장됩니다.
+- **타임라인**: 한 세션 안에서 메인과 서브에이전트가 한 일을 시간축으로.
+- **diff**: 수정 이벤트를 누르면 에디터의 전/후 비교가 열립니다.
+
+### 세션 이름과 연결
+
+- 이름은 세션 제목(`/rename` 등으로 붙인 것)을 transcript에서 읽고, 없으면 첫 프롬프트를 씁니다. 노드의 **이름 바꾸기**로 직접 정할 수 있습니다.
+- 메시지 수신자는 `kftc-3f` 같은 핸들로 기록되는데, 받은 쪽 세션에 같은 내용이 도착하면 자동으로 어떤 세션인지 연결됩니다. 연결이 안 된 핸들은 점선 노드로 보이고, **세션에 연결하기**로 직접 지정할 수 있습니다.
+- 직접 지정한 내용은 `~/.session-flow/names.json`에 저장됩니다.
 
 ## 구성
 
@@ -43,9 +56,18 @@ VS Code 확장 ──파일 감시───────────┘──▶ 
 | Edit / Write / MultiEdit / NotebookEdit | 수정 직전·직후 파일 스냅샷 → 전/후 diff |
 | `delegate` | 서브에이전트에 보낸 프롬프트 (Agent/Task 툴) |
 | `subagent_start` / `subagent_stop` | 서브에이전트 시작, 최종 반환 메시지 |
-| `message` | 에이전트 간 SendMessage |
+| `message` | 다른 세션으로 보낸 메시지 (SendMessage) |
+| `message_in` | 다른 세션에서 받은 메시지 (`<cross-session-message>`) |
 
 서브에이전트 안에서 일어난 툴 호출은 hook 입력의 `agent_id`로 구분되어 별도 레인에 표시됩니다.
+
+## 업데이트
+
+```bash
+claude plugin marketplace update session-flow
+claude plugin update session-flow@session-flow
+```
+확장은 새 `.vsix`를 받아 다시 **Install from VSIX** 하면 됩니다. 그 뒤 창을 새로고침하세요.
 
 ## 설정
 
@@ -62,6 +84,7 @@ VS Code 확장 ──파일 감시───────────┘──▶ 
 
 ```bash
 node test/smoke.js                 # hook 기록 → 세션 빌드 스모크 테스트
+node test/graph.js                 # 여러 세션 메시지 → 그래프 (jsdom 있으면 화면 렌더까지)
 cd extension && npx @vscode/vsce package --no-dependencies
 ```
 VS Code에서 `extension/` 폴더를 열고 F5로 Extension Development Host 실행.
