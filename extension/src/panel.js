@@ -52,8 +52,7 @@ function panelHtml() {
   .chip.main { background: rgba(232,176,75,.28); }
   .chip.ext { background: rgba(232,176,75,.18); }
   .chip.live { background: rgba(111,214,154,.2); }
-  .stage { position:relative; flex:1; min-width:0; overflow:hidden; cursor:grab;
-    background-image: radial-gradient(circle, rgba(127,127,127,.32) 1.2px, transparent 1.3px); background-size: 24px 24px; }
+  .stage { position:relative; flex:1; min-width:0; overflow:hidden; cursor:grab; }
   .stage.panning { cursor:grabbing; }
   .stage.drop { outline:2px dashed var(--accent); outline-offset:-6px; }
   .world { position:absolute; left:0; top:0; transform-origin:0 0; }
@@ -135,14 +134,19 @@ function panelHtml() {
   .fchip text { font-family: var(--vscode-editor-font-family); font-size:11px; fill:#E8A15A; }
   .fchip.sub rect { stroke: var(--live); } .fchip.sub text { fill: var(--live); }
   .wall rect { fill: var(--viol); } .wall text { font-size:12px; font-weight:700; fill:#2a0d0e; }
-  .feed { position:absolute; right:12px; bottom:34px; width:min(330px, 60%); display:flex; flex-direction:column; gap:2px; pointer-events:none; }
-  .feed button { all:unset; pointer-events:auto; display:grid; grid-template-columns: 40px 30px minmax(0,1fr); gap:6px; padding:4px 8px; border-radius:6px; font-size:11.5px; cursor:pointer;
-    background: color-mix(in srgb, var(--vscode-editor-background) 82%, transparent); }
-  .feed button:hover, .feed button:focus-visible { background: var(--vscode-list-hoverBackground, rgba(127,127,127,.2)); }
-  .feed .t { font-family: var(--vscode-editor-font-family); font-size:10.5px; opacity:.6; }
-  .feed .k { font-weight:600; font-size:10.5px; }
-  .feed .d { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .feed .msg .k { color:#B48CF2; } .feed .block .k { color: var(--viol); } .feed .edit .k { color:#E8A15A; } .feed .sub .k { color: var(--live); }
+  .log { display:flex; flex-direction:column; gap:1px; margin:0 -8px; }
+  .lrow { display:flex; align-items:center; border-radius:6px; }
+  .lrow:hover, .lrow:focus-within { background: var(--vscode-list-hoverBackground, rgba(127,127,127,.14)); }
+  .lrow .go { all:unset; flex:1; min-width:0; display:grid; grid-template-columns: 62px 30px minmax(0,1fr); gap:8px; align-items:baseline; padding:6px 8px; cursor:pointer; font-size:12.5px; }
+  .lrow .go:focus-visible { outline:2px solid var(--vscode-focusBorder); outline-offset:-2px; border-radius:6px; }
+  .lrow .t { font-family: var(--vscode-editor-font-family); font-size:11px; opacity:.6; font-variant-numeric: tabular-nums; }
+  .lrow .k { font-weight:600; font-size:11.5px; }
+  .lrow .d { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lrow .dv { background:none; padding:2px 8px; font-size:11px; opacity:.75; }
+  .lrow.k-msg .k { color:#B48CF2; } .lrow.k-in .k { color:#7FB8FF; } .lrow.k-block .k { color: var(--viol); } .lrow.k-edit .k { color:#E8A15A; } .lrow.k-sub .k { color: var(--live); }
+  .lhead { display:flex; align-items:center; gap:8px; }
+  .lhead h2 { font-size:12px; font-weight:600; letter-spacing:.03em; opacity:.75; }
+  .lhead button { margin-left:auto; }
   .close { margin-left:auto; background:none; padding:2px 6px; opacity:.7; }
   @media (prefers-reduced-motion: reduce) { .el.active, .node.live, .breathe, .running .leg, .working .hammer, .hop { animation:none; } }
   @media (max-width: 860px) { .main { flex-direction:column; } .tray { width:auto; max-height:22%; border-right:0; border-bottom:1px solid var(--line); } aside, aside.wide { width:auto; max-height:40%; border-left:0; border-top:1px solid var(--line); } .stage { min-height:300px; } }
@@ -171,7 +175,6 @@ function panelHtml() {
         <button type="button" class="primary" id="ask-write">세션에게 하네스 작성 맡기기</button>
       </div>
       <div class="legend" id="legend"></div>
-      <div class="feed" id="feed" aria-label="방금 일어난 일"></div>
     </div>
     <aside id="side"></aside>
   </div>
@@ -236,13 +239,12 @@ function panelHtml() {
     $('stats').textContent = '멤버 ' + S.members.length + (live ? ' · 작업 중 ' + live : '') + ' · 멤버 간 메시지 ' + msgs;
     $('empty').hidden = S.members.length > 0;
     $('legend').replaceChildren(...(mode === 'flow'
-      ? ['━ 정한 방향 + 실제 메시지 수', '┅ 방금 오감', '┈ 정했지만 아직 안 오감', '┅ 빨강: 정한 방향 밖', '클릭: 상세 · 더블클릭: Claude Code 열기']
+      ? ['━ 정한 방향 + 실제 메시지 수', '┅ 방금 오감', '┈ 정했지만 아직 안 오감', '┅ 빨강: 정한 방향 밖', '클릭: 이벤트 · 더블클릭: 설정']
       : ['보내는 세션 → 받는 세션 순서로 누르면 방향이 생깁니다', '화살표를 누르면 지울 수 있습니다']).map((t) => el('span', null, t)));
     renderTray();
     renderNodes();
     drawEdges();
     syncChars();
-    renderFeed();
     renderSide();
   }
 
@@ -270,10 +272,10 @@ function panelHtml() {
     host.replaceChildren();
     for (const m of S.members) {
       const p = pos[m.name] || { x: 0, y: 0 };
-      const b = el('button', 'node' + (m.live ? ' live' : '') + (!m.sid ? ' unresolved' : '') + (sel && sel.type === 'member' && key(sel.name) === key(m.name) ? ' sel' : '') + (connectFrom && key(connectFrom) === key(m.name) ? ' connecting' : ''));
+      const b = el('button', 'node' + (m.live ? ' live' : '') + (!m.sid ? ' unresolved' : '') + (sel && (sel.type === 'member' || sel.type === 'log') && key(sel.name) === key(m.name) ? ' sel' : '') + (connectFrom && key(connectFrom) === key(m.name) ? ' connecting' : ''));
       b.type = 'button'; b.dataset.name = m.name;
       b.style.left = (p.x - W / 2) + 'px'; b.style.top = (p.y - NH / 2) + 'px';
-      b.title = (m.role ? '역할: ' + m.role + '\\n' : '') + (m.sid ? '더블클릭: Claude Code에서 열기' : '연결된 세션을 찾지 못했습니다');
+      b.title = (m.role ? '역할: ' + m.role + '\\n' : '') + '클릭: 이벤트 · 더블클릭: 설정' + (m.sid ? '' : '\\n연결된 세션을 찾지 못했습니다');
       const t = el('span', 't'); t.append(el('b', null, m.name));
       if (m.main) t.append(el('span', 'chip main', '메인'));
       const ext = m.external.out + m.external.in;
@@ -356,10 +358,12 @@ function panelHtml() {
   function renderSide() {
     const side = $('side');
     side.replaceChildren();
-    side.hidden = mode === 'flow' && !sel;
-    if (side.hidden) return;
     side.classList.toggle('wide', !!(sel && sel.type === 'diff'));
-    if (sel) { const c = btn('✕', 'close', () => select(null)); c.title = '닫기'; c.setAttribute('aria-label', '상세 닫기'); side.append(c); }
+    if (mode === 'flow' && (!sel || sel.type === 'log')) return renderLog(side, sel ? sel.name : null);
+    if (sel) {
+      const back = sel.type === 'member' ? { type: 'log', name: sel.name } : null;
+      const c = btn('✕', 'close', () => select(back)); c.title = '닫기'; c.setAttribute('aria-label', '닫고 이벤트로'); side.append(c);
+    }
     if (sel && sel.type === 'diff') return renderDiff(side);
     if (sel && sel.type === 'member' && member(sel.name)) return renderMember(side, member(sel.name));
     if (sel && sel.type === 'tray') { const s = S.tray.find((x) => x.sid === sel.sid); if (s) return renderTraySide(side, s); }
@@ -547,7 +551,6 @@ function panelHtml() {
   const saved = (vscode.getState && vscode.getState()) || {};
   let fxMode = saved.fx || 'char';
   let seen = null;
-  const feed = [];
   const chars = {};
   const tickers = [];
   let rafOn = false;
@@ -681,16 +684,16 @@ function panelHtml() {
   function runEdit(ev) {
     const c = chars[ev.from];
     if (c) { c.root.classList.add('working'); clearTimeout(c.tm); c.tm = setTimeout(() => c.root.classList.remove('working'), 1800); }
-    floatChip(ev.from, '± ' + ev.file);
+    floatChip(ev.from, '± ' + base(ev.file) + lines(ev));
   }
   function runSub(ev) {
-    floatChip(ev.from, ev.agent, 'sub');
+    floatChip(ev.from, ev.agent + (ev.n > 1 ? ' ×' + ev.n : ''), 'sub');
     if (fxMode !== 'char' || reduce) return;
     const color = colorOf(ev.from);
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < Math.min(3, Math.max(1, ev.n || 1)); i++) {
       const g = SV('g', {}, $('fx-runs')); const inner = SV('g', {}, g);
       const c = makeChar(color, inner, { ghost: true, still: true }); c.root.classList.add('running');
-      const t0 = performance.now(), ms = 2600, ph = i * Math.PI;
+      const t0 = performance.now(), ms = 2600, ph = (i / Math.min(3, Math.max(1, ev.n || 1))) * Math.PI * 2;
       tick((now) => {
         const p = Math.min(1, (now - t0) / ms), ctr = pos[member(ev.from) ? member(ev.from).name : ''];
         if (!ctr) { g.remove(); return false; }
@@ -709,42 +712,41 @@ function panelHtml() {
     else if (ev.kind === 'sub') runSub(ev);
   }
 
-  // 새 활동 찾기: 메시지는 멤버 사이 traffic, 수정·위임은 멤버의 최근 활동
+  // 새 활동 찾기: 상태의 activity(최신 먼저)에서 처음 보는 idx 만
   function detect() {
-    const out = []; let max = seen == null ? -1 : seen;
-    S.traffic.forEach((t) => t.messages.forEach((x) => {
-      if (x.idx == null) return; max = Math.max(max, x.idx);
-      if (seen != null && x.idx > seen) out.push({ idx: x.idx, ts: x.ts, kind: x.blocked ? 'block' : 'msg', from: t.from, to: t.to, text: x.text || '' });
-    }));
-    S.members.forEach((m) => (m.recent || []).forEach((e) => {
-      if (e.idx == null) return; max = Math.max(max, e.idx);
-      if (seen == null || e.idx <= seen) return;
-      if (e.hasDiff && e.file) out.push({ idx: e.idx, ts: e.ts, kind: 'edit', from: m.name, file: base(e.file) });
-      else if (e.kind === 'delegate') out.push({ idx: e.idx, ts: e.ts, kind: 'sub', from: m.name, agent: e.target || e.agent || '서브에이전트' });
-    }));
-    const seenIdx = new Set();
-    seen = max;
-    return out.filter((x) => !seenIdx.has(x.idx) && seenIdx.add(x.idx)).sort((a, b) => a.idx - b.idx);
+    const list = S.activity || [];
+    const max = list.reduce((a, x) => Math.max(a, x.idx), -1);
+    const out = seen == null ? [] : list.filter((x) => x.idx > seen).slice().reverse();
+    seen = Math.max(seen == null ? -1 : seen, max);
+    return out;
   }
-  function playBatch(list) {
-    if (!list.length) return;
-    list.forEach((ev) => feed.unshift(ev));
-    feed.splice(5);
-    renderFeed();
-    list.slice(-6).forEach((ev, i) => setTimeout(() => play(ev), i * 450));
-  }
-  const KIND = { msg: '보냄', block: '차단', edit: '수정', sub: '위임' };
-  function renderFeed() {
-    const box = $('feed');
-    box.hidden = mode !== 'flow' || !feed.length;
-    box.replaceChildren(...feed.map((ev) => {
-      const b = el('button', ev.kind); b.type = 'button'; b.title = '다시 재생';
-      const d = ev.kind === 'edit' ? ev.from + ' · ' + ev.file : ev.kind === 'sub' ? ev.from + ' · ' + ev.agent : ev.from + ' → ' + ev.to + ': ' + ev.text;
-      b.append(el('span', 't', fmt(ev.ts)), el('span', 'k', KIND[ev.kind]), el('span', 'd', d));
-      b.addEventListener('click', (e) => { e.stopPropagation(); play(ev); });
-      b.addEventListener('pointerdown', (e) => e.stopPropagation());
-      return b;
-    }));
+  function playBatch(list) { list.slice(-6).forEach((ev, i) => setTimeout(() => play(ev), i * 450)); }
+  const hms = (ts) => { const d = new Date(ts); return isNaN(d) ? '' : [d.getHours(), d.getMinutes(), d.getSeconds()].map((v) => String(v).padStart(2, '0')).join(':'); };
+  const lines = (ev) => (ev.add == null ? '' : ' +' + ev.add + ' −' + ev.del);
+  function renderLog(side, name) {
+    const head = el('div', 'lhead');
+    head.append(el('h2', null, name ? name + ' 이벤트 · 누르면 다시 재생' : '이벤트 · 누르면 다시 재생'));
+    if (name) head.append(btn('전체', 'link', () => select(null)), btn('설정', '', () => select({ type: 'member', name })));
+    side.append(head);
+    if (name) { const m = member(name); if (m && m.role) side.append(el('div', 'muted', m.role)); }
+    const mine = (x) => !name || key(x.from) === key(name) || key(x.to) === key(name);
+    const list = (S.activity || []).filter(mine).slice(0, 120);
+    if (!list.length) { side.append(el('div', 'muted', name ? '아직 이 세션의 메시지·수정 기록이 없습니다.' : '아직 기록된 이벤트가 없습니다. 멤버끼리 메시지를 보내거나 파일을 고치면 여기에 쌓입니다.')); return; }
+    const box = el('div', 'log');
+    list.forEach((ev) => {
+      const inbound = name && (ev.kind === 'msg' || ev.kind === 'block') && key(ev.to) === key(name);
+      const k = ev.kind === 'msg' ? (inbound ? '받음' : '보냄') : ev.kind === 'block' ? '차단' : ev.kind === 'edit' ? '수정' : '위임';
+      const d = ev.kind === 'edit' ? ev.from + ' · ' + base(ev.file) + lines(ev) + (ev.sub ? ' · ' + ev.sub : '')
+        : ev.kind === 'sub' ? ev.from + ' · ' + ev.agent + ' ' + ev.n + '개'
+        : ev.from + ' → ' + ev.to + ': ' + String(ev.text || '').replace(/\\s+/g, ' ');
+      const row = el('div', 'lrow k-' + (inbound && ev.kind === 'msg' ? 'in' : ev.kind));
+      const go = btn('', 'go', () => play(ev)); go.title = '다시 재생' + (ev.text ? '\\n' + ev.text : ev.file ? '\\n' + ev.file : '');
+      go.append(el('span', 't', hms(ev.ts)), el('span', 'k', k), el('span', 'd', d));
+      row.append(go);
+      if (ev.kind === 'edit') { const dv = btn('비교', 'dv', () => showDiff({ first: ev.idx, last: ev.idx, file: ev.file, edits: 1 })); dv.title = '전/후 비교'; row.append(dv); }
+      box.append(row);
+    });
+    side.append(box);
   }
   document.querySelectorAll('[data-fx]').forEach((b) => b.addEventListener('click', () => {
     fxMode = b.dataset.fx;
@@ -776,12 +778,12 @@ function panelHtml() {
         b.removeEventListener('pointermove', move); b.removeEventListener('pointerup', up);
         if (moved) send({ type: 'layout', positions: pos });
         else if (mode === 'design') designClick(m);
-        else select({ type: 'member', name: m.name });
+        else select({ type: 'log', name: m.name });
       };
       b.addEventListener('pointermove', move); b.addEventListener('pointerup', up);
     });
-    b.addEventListener('dblclick', () => { if (m.sid) send({ type: 'openSession', sid: m.sid }); });
-    b.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); mode === 'design' ? designClick(m) : select({ type: 'member', name: m.name }); } });
+    b.addEventListener('dblclick', () => { if (mode === 'flow') select({ type: 'member', name: m.name }); });
+    b.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); mode === 'design' ? designClick(m) : select({ type: ev.shiftKey ? 'member' : 'log', name: m.name }); } });
   }
 
   const stage = $('stage');
@@ -845,7 +847,7 @@ function panelHtml() {
       S = m.state;
       pos = Object.assign({}, S.layout || {}, pos);
       Object.keys(pos).forEach((k) => { if (!member(k)) delete pos[k]; });
-      if (sel && sel.type === 'member' && !member(sel.name)) sel = null;
+      if (sel && (sel.type === 'member' || sel.type === 'log') && !member(sel.name)) sel = null;
       if (sel && sel.type === 'tray' && !S.tray.some((x) => x.sid === sel.sid)) sel = null;
       layout();
       if (S.members.map((x) => x.name).join('|') !== before) seen = null; // 멤버가 바뀌면 지난 기록은 재생하지 않고 기준점만 다시 잡는다
@@ -853,6 +855,8 @@ function panelHtml() {
       render();
       if (firstFit || S.members.map((x) => x.name).join('|') !== before) { fit(); firstFit = false; }
       playBatch(fresh);
+    } else if (m.type === 'focus') {
+      if (member(m.name)) { mode = 'flow'; select({ type: 'log', name: m.name }); }
     } else if (m.type === 'diffResult') {
       if (diffState && diffState.key === m.key) { diffState.data = m.diff; renderSide(); }
     }

@@ -122,6 +122,30 @@ ext.activate(context);
   assert.strictEqual(ttaItem.label, 'TTA 전문가', '세션 이름이 없어도 하네스 이름으로');
   assert.ok(ttaItem.description.includes('이름 필요'));
 
+  // 사이드바에서 멤버 세션 누르기 → 하네스 화면에서 그 멤버 이벤트 (focus)
+  const gnnItem = vscode._tree.getTreeItem(sb.find((x) => x.s.id === GNN));
+  assert.strictEqual(gnnItem.command.command, 'sessionFlow.focusMember');
+  commands[gnnItem.command.command](...gnnItem.command.arguments);
+  await wait();
+  assert.deepStrictEqual(posted[posted.length - 1], { type: 'focus', name: 'GNN' });
+
+  // 이벤트 목록(activity): 멤버 사이 메시지 + 파일 수정(+/− 줄 수) + 위임(묶어서 개수)
+  const af = path.join(proj, 'src', 'train.py');
+  fs.writeFileSync(af, 'a\nb\nc\n');
+  rec(GNN, { hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_use_id: 'e1', tool_input: { file_path: af } }, path.join(proj, 'src'));
+  fs.writeFileSync(af, 'a\nB\nc\nd\n');
+  rec(GNN, { hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_use_id: 'e1', tool_input: { file_path: af } }, path.join(proj, 'src'));
+  rec(RAG, { hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_use_id: 'd1', tool_input: { subagent_type: 'Explore', description: '문서 찾기', prompt: 'x' } });
+  rec(RAG, { hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_use_id: 'd2', tool_input: { subagent_type: 'Explore', description: '문서 찾기2', prompt: 'y' } });
+  commands['sessionFlow.refresh'](); await wait(60);
+  s = state();
+  const ed = s.activity.find((x) => x.kind === 'edit');
+  assert.ok(ed && ed.from === 'GNN' && ed.file === af && ed.add === 2 && ed.del === 1, '수정 +2 −1: ' + JSON.stringify(ed));
+  const sb2 = s.activity.find((x) => x.kind === 'sub');
+  assert.ok(sb2 && sb2.from === 'RAG 및 LLM' && sb2.agent === 'Explore' && sb2.n === 2, '위임 묶음: ' + JSON.stringify(sb2));
+  assert.ok(s.activity.some((x) => x.kind === 'msg' && x.from === '메인 핸들러' && x.to === 'GNN' && x.text === '학습 시작해줘'));
+  assert.ok(s.activity.every((x, i, a) => !i || a[i - 1].idx > x.idx), '최신 먼저');
+
   // 이름 맞추기: /rename 안 된 멤버(TTA 전문가) 입력창 채우기
   external.length = 0;
   await send({ type: 'fixNames' });

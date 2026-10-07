@@ -141,9 +141,33 @@ function viewState({ folder, cfg, sessions, transcripts, aliases = {}, norm, now
     })
     .sort((a, b) => b.last - a.last);
 
+  // 이벤트 목록 (최신 먼저): 멤버 사이 메시지, 멤버의 파일 수정, 서브에이전트 위임
+  const activity = [];
+  for (const t of traffic) for (const x of t.messages) {
+    if (x.idx == null) continue;
+    activity.push({ idx: x.idx, ts: x.ts, kind: x.blocked ? 'block' : 'msg', from: t.from, to: t.to, text: x.text || '' });
+  }
+  for (const [name, s] of Object.entries(bySession)) {
+    if (!s) continue;
+    let lastSub = null;
+    for (const e of s.events) {
+      if (e.kind === 'tool' && e.file && (e.has_after || e.has_before)) {
+        activity.push({ idx: e._idx, ts: e.ts, kind: 'edit', from: name, file: e.file, sub: e.agent_type || null });
+      } else if (e.kind === 'delegate') {
+        const t = Date.parse(e.ts);
+        if (lastSub && lastSub.agent === (e.target || '') && t - lastSub.t < 15000) { lastSub.n += 1; lastSub.t = t; continue; }
+        lastSub = { idx: e._idx, ts: e.ts, t, kind: 'sub', from: name, agent: e.target || '서브에이전트', n: 1 };
+        activity.push(lastSub);
+      }
+    }
+  }
+  activity.sort((a, b) => b.idx - a.idx);
+  activity.splice(200);
+  activity.forEach((x) => { delete x.t; });
+
   return {
     folder, name: c.name || path.basename(folder), exists: !!cfg, enforce: c.enforce,
-    members, edges: c.edges, traffic, tray, layout: c.layout,
+    members, edges: c.edges, traffic, tray, layout: c.layout, activity,
   };
 }
 

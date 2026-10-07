@@ -119,7 +119,9 @@ class TreeProvider {
       it.tooltip = [m ? `하네스 멤버 "${m.name}"${m.role ? ` — ${m.role}` : ''}` : '하네스 멤버 아님', m && !node.named ? `세션 이름(/rename)이 아직 "${m.name}"가 아닙니다. 하네스 화면에서 /rename 을 채울 수 있습니다.` : null, `세션: ${node.s.displayName}`, node.s.cwd || '', node.s.id].filter(Boolean).join('\n');
       it.iconPath = new vscode.ThemeIcon(node.s.live ? 'pulse' : m ? (m.main ? 'star-full' : 'account') : 'history');
       it.contextValue = 'session';
-      it.command = { command: 'sessionFlow.openTimeline', title: '기록', arguments: [node] };
+      it.command = m
+        ? { command: 'sessionFlow.focusMember', title: '이벤트 보기', arguments: [node.s.folder, m.name] }
+        : { command: 'sessionFlow.openTimeline', title: '기록', arguments: [node] };
       return it;
     }
     if (node.type === 'agent') {
@@ -244,15 +246,30 @@ function activate(context) {
   }
 
   // ── 하네스 패널 ──
-  let hp; let hpFolder;
+  let hp; let hpFolder; let pendingFocus = null;
+  const lineCache = new Map();
   const folderNow = () => (hpFolder && roots().includes(hpFolder) ? hpFolder : roots()[0]);
   function postState() {
     if (!hp) return;
     const folder = folderNow();
     if (!folder) return;
     const state = harness.viewState({ folder, cfg: harness.load(folder), sessions: model.sessions, transcripts: model.tr, norm });
+    // 수정 이벤트에 +/− 줄 수 (스냅샷 비교, idx 별로 캐시)
+    for (const a of state.activity) {
+      if (a.kind !== 'edit') continue;
+      let c = lineCache.get(a.idx);
+      if (!c) { const e = model.byIdx.get(a.idx); const d = e && e.tool_use_id ? diffLines(readSnap(e, 'before'), readSnap(e, 'after')) : null; c = d ? { add: d.add, del: d.del } : { add: null, del: null }; lineCache.set(a.idx, c); }
+      a.add = c.add; a.del = c.del;
+    }
     hp.title = `${state.name} 하네스`;
     hp.webview.postMessage({ type: 'state', state });
+    if (pendingFocus) { hp.webview.postMessage({ type: 'focus', name: pendingFocus }); pendingFocus = null; }
+  }
+  // 사이드바에서 멤버 세션을 누르면: 하네스 화면을 열고 그 멤버의 이벤트 목록을 보여준다
+  function focusMember(folder, name) {
+    pendingFocus = name;
+    if (hp) { if (typeof folder === 'string') hpFolder = folder; hp.reveal(); postState(); return; }
+    openHarness(folder);
   }
   function edit(fn) {
     const folder = folderNow();
@@ -368,6 +385,7 @@ function activate(context) {
     vscode.workspace.registerTextDocumentContentProvider(DETAIL_SCHEME, detailProvider),
     vscode.commands.registerCommand('sessionFlow.openHarness', openHarness),
     vscode.commands.registerCommand('sessionFlow.openTimeline', openTimeline),
+    vscode.commands.registerCommand('sessionFlow.focusMember', focusMember),
     vscode.commands.registerCommand('sessionFlow.openEvent', openEvent),
     vscode.commands.registerCommand('sessionFlow.openClaude', (node) => node && node.s && openClaudeSession(node.s.id)),
     vscode.commands.registerCommand('sessionFlow.askWrite', askWrite),
