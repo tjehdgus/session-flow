@@ -68,7 +68,8 @@ function buildSessions(events, now = Date.now(), roots = []) {
     if (!QUIET_KINDS.has(e.kind)) s.activity += 1;
     s.start = Math.min(s.start, e._t);
     s.end = Math.max(s.end, e._t);
-    if (!s.title && e.kind === 'prompt' && !e.agent_id) s.title = e.summary;
+    // <task-notification>, <command-name> 같은 시스템이 넣은 프롬프트는 제목으로 쓰지 않는다
+    if (!s.title && e.kind === 'prompt' && !e.agent_id && !/^\s*</.test(e.summary || '')) s.title = e.summary;
     if (e.transcript_path && !e.agent_id) s.transcriptPath = e.transcript_path;
     if (e.kind === 'session_end') s.ended = true;
 
@@ -252,8 +253,8 @@ function buildGraph(allSessions, opts = {}) {
     nodes.push({
       id: s.id,
       kind: 'session',
-      label: names[s.id] || tr.title || s.title,
-      autoLabel: tr.title || s.title,
+      label: names[s.id] || tr.title || tr.summary || s.title,
+      autoLabel: tr.title || tr.summary || s.title,
       sub: s.cwd ? s.cwd.split(/[\\/]/).pop() : '',
       cwd: s.cwd,
       handle: handleOf[s.id],

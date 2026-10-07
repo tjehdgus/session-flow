@@ -80,7 +80,7 @@ class Model {
   applyNames(names, transcripts) {
     for (const s of this.sessions) {
       const t = transcripts[s.id];
-      s.displayName = names[s.id] || (t && t.title) || s.title;
+      s.displayName = names[s.id] || (t && (t.title || t.summary)) || s.title;
     }
   }
 }

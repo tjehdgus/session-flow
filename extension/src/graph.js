@@ -21,6 +21,7 @@ function graphHtml() {
 <style nonce="${n}">
   :root { --accent:#5B9DFF; --edge:#6B7383; --live:#6FD69A; --ghost:#9AA3B2; --sub:#B48CF2; }
   * { box-sizing: border-box; }
+  [hidden] { display:none !important; }
   html, body { margin:0; height:100%; overflow:hidden; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
   .app { display:flex; flex-direction:column; height:100%; }
   header { display:flex; flex-wrap:wrap; align-items:center; gap:12px 18px; padding:10px 16px; border-bottom:1px solid var(--vscode-panel-border, rgba(127,127,127,.25)); }

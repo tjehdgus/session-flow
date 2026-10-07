@@ -18,6 +18,7 @@ function timelineHtml(webview) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Session Flow</title>
 <style nonce="${n}">
+  [hidden] { display:none !important; }
   :root { --edit:#F0A35E; --bash:#5B9DFF; --msg:#B48CF2; --err:#F26D6D; }
   body { margin:0; padding:16px 20px; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
   header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:16px; }
