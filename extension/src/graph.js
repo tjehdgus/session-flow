@@ -95,6 +95,32 @@ function graphHtml() {
   .dl.add { background: rgba(46,160,67,.18); } .dl.add .sg { color:#4CC38A; }
   .dl.del { background: rgba(248,81,73,.16); } .dl.del .sg { color:#F2797B; }
   .note { font-size:12px; opacity:.7; padding:8px 0; }
+  .node.other { border-style:dotted; opacity:.85; background: transparent; }
+  .main { position:relative; }
+  .newbar { position:absolute; left:12px; right:12px; top:10px; z-index:5; display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; padding:8px 12px; border-radius:8px; font-size:12px;
+    background: var(--vscode-editorWidget-background, #252830); border:1px solid var(--vscode-focusBorder, #5B9DFF); box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+  .newbar span { flex:1; min-width:180px; }
+  .picker { position:absolute; inset:0; z-index:10; overflow:auto; background: var(--vscode-editor-background); padding:24px 16px; }
+  .pk { max-width:780px; margin:0 auto; display:flex; flex-direction:column; gap:14px; }
+  .pk h2 { margin:0; font-size:16px; }
+  .pk .lead { font-size:12.5px; opacity:.75; line-height:1.6; }
+  .pk-tools { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:12px; }
+  .pk-tools .cnt { margin-left:auto; opacity:.75; }
+  .pk-list { display:flex; flex-direction:column; gap:8px; }
+  .pk-row { display:grid; grid-template-columns: 22px minmax(0,1fr); gap:6px 12px; padding:12px 14px; border-radius:10px; border:1px solid var(--vscode-panel-border, rgba(127,127,127,.25)); background: var(--vscode-sideBar-background, #1b1f27); }
+  .pk-row.on { border-color: var(--vscode-focusBorder, #5B9DFF); }
+  .pk-row input[type=checkbox] { margin-top:8px; width:16px; height:16px; }
+  .pk-body { display:flex; flex-direction:column; gap:5px; min-width:0; }
+  .pk-name { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .pk-name input { flex:1; min-width:180px; font: inherit; font-size:13px; font-weight:600; padding:5px 8px; border-radius:5px; border:1px solid var(--vscode-input-border, rgba(127,127,127,.35)); background: var(--vscode-input-background, rgba(127,127,127,.08)); color: var(--vscode-input-foreground, var(--vscode-foreground)); }
+  .badge { font-size:10.5px; padding:2px 7px; border-radius:999px; background: rgba(91,157,255,.18); color: var(--vscode-foreground); }
+  .badge.live { background: rgba(76,195,138,.18); }
+  .pk-meta { font-size:11.5px; opacity:.7; }
+  .pk-first, .pk-recent { font-size:12px; opacity:.85; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pk-recent { font-family: var(--vscode-editor-font-family); font-size:11px; opacity:.6; }
+  .pk-h { display:grid; grid-template-columns: minmax(0,1fr) minmax(160px, 240px); gap:6px 12px; align-items:center; padding:10px 14px; border-radius:10px; border:1px dashed var(--vscode-panel-border, rgba(127,127,127,.35)); }
+  .pk-h select { width:100%; }
+  .pk-foot { position:sticky; bottom:0; display:flex; gap:8px; justify-content:flex-end; padding:12px 0 4px; background: var(--vscode-editor-background); }
   .empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center; line-height:1.9; opacity:.7; pointer-events:none; padding:24px; }
   .hint { position:absolute; left:12px; bottom:10px; font-size:11px; opacity:.55; pointer-events:none; }
   @media (max-width: 720px) { .main { flex-direction:column; } aside { width:auto; max-height:45%; border-left:0; border-top:1px solid var(--vscode-panel-border, rgba(127,127,127,.25)); } }
@@ -114,6 +140,7 @@ function graphHtml() {
         <option value="168">최근 7일</option>
         <option value="0">전체</option>
       </select></label>
+      <button type="button" id="pick">세션 고르기</button>
       <button type="button" id="fit">화면 맞춤</button>
       <button type="button" id="relayout">배치 초기화</button>
     </div>
@@ -128,6 +155,8 @@ function graphHtml() {
       <div class="hint">드래그: 노드 이동 · 빈 곳 드래그: 화면 이동 · 휠: 확대/축소 · 더블클릭: 타임라인</div>
     </div>
     <aside id="side"></aside>
+    <div class="newbar" id="newbar" hidden><span id="newtext"></span><button type="button" class="primary" id="newpick">고르기</button><button type="button" id="newignore">추가 안 함</button></div>
+    <div class="picker" id="picker" hidden></div>
   </div>
 </div>
 
@@ -139,7 +168,11 @@ function graphHtml() {
   let graph = { nodes: [], edges: [] };
   let pos = {};
   let sel = null;            // { type:'node'|'edge'|'diff', id }
-  let diffState = null;      // { key, first, last, file, edits, back, data }
+  let diffState = null;
+  let picker = null;          // 확장에서 받은 고르기 데이터
+  let pickerOpen = false;
+  let pickerDismissed = false;
+  let currentFolder = '';      // { key, first, last, file, edits, back, data }
   let view = { x: 0, y: 0, k: 1 };
   let firstFit = true;
 
@@ -201,7 +234,7 @@ function graphHtml() {
       b.style.top = (p.y - size(n).h / 2) + 'px';
       b.title = (n.cwd || '') + (n.handle ? '  @' + n.handle : '');
       b.append(el('span', 't', n.label));
-      const sub = n.kind === 'ghost' ? n.sub : (n.live ? '● 작업 중 · ' : '') + n.eventCount + ' events' + (n.fileCount ? ' · 파일 ' + n.fileCount : '');
+      const sub = (n.kind === 'ghost' || n.kind === 'other') ? n.sub : (n.live ? '● 작업 중 · ' : '') + n.eventCount + ' events' + (n.fileCount ? ' · 파일 ' + n.fileCount : '');
       b.append(el('span', 's' + (n.live ? ' on' : ''), sub));
       attachDrag(b, n);
       host.append(b);
@@ -295,7 +328,7 @@ function graphHtml() {
         .sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
       msgs.forEach((m) => {
         const box = el('div', 'msg' + (m.from === e.from ? ' out' : ''));
-        box.append(el('span', 'h', fmt(m.ts) + ' · ' + labelOf(m.from) + ' → ' + labelOf(m.to)), el('span', 'b', m.text || ''));
+        box.append(el('span', 'h', fmt(m.ts) + ' · ' + labelOf(m.from) + ' → ' + labelOf(m.to) + (m.via ? ' (' + m.via + ')' : '')), el('span', 'b', m.text || ''));
         side.append(box);
       });
       const row = el('div', 'row');
@@ -313,6 +346,14 @@ function graphHtml() {
     const n = graph.nodes.find((x) => x.id === sel.id);
     if (!n) { sel = null; return renderSide(); }
     side.append(el('h2', null, n.label));
+    if (n.kind === 'other') {
+      side.append(el('div', 'muted', '그래프에 넣지 않은 세션과 주고받은 메시지를 한데 모은 노드입니다. 화살표를 누르면 어느 세션과 오간 메시지인지 함께 보입니다.'));
+      (n.members || []).forEach((m) => side.append(el('div', 'ev', m)));
+      const b = el('button', 'primary', '세션 고르기'); b.type = 'button';
+      b.addEventListener('click', () => openPicker());
+      side.append(b);
+      return;
+    }
     if (n.kind === 'ghost') {
       side.append(el('div', 'muted', '메시지가 @' + n.handle + ' 앞으로 갔지만, 어떤 세션인지 아직 알아내지 못했습니다. 그 세션에 플러그인이 적용된 상태로 메시지를 한 번 받으면 자동으로 연결되고, 지금 바로 직접 연결할 수도 있습니다.'));
       const b = el('button', 'primary', '세션에 연결하기'); b.type = 'button';
@@ -423,6 +464,109 @@ function graphHtml() {
 
   function select(s) { sel = s; render(); }
 
+  // ── 세션 고르기 ──
+  function updatePickerChrome() {
+    const nc = picker ? picker.newCount : 0;
+    $('newbar').hidden = !nc || pickerOpen;
+    $('newtext').textContent = '새 세션 ' + nc + '개가 생겼습니다. 그래프에 넣을지 골라주세요.';
+    if (picker && picker.needsSetup && !pickerDismissed && !pickerOpen) openPicker(true);
+  }
+
+  function openPicker(first) {
+    if (!picker) return;
+    pickerOpen = true;
+    $('newbar').hidden = true;
+    const box = $('picker');
+    box.replaceChildren();
+    box.hidden = false;
+    const wrap = el('div', 'pk');
+    const fname = (currentFolder || '').split(/[\\/]/).pop();
+    wrap.append(el('h2', null, '세션 고르기 · ' + fname));
+    wrap.append(el('div', 'lead', '그래프에 넣을 세션을 체크하고 알아보기 쉬운 이름을 붙이세요. 고르지 않은 세션과 오간 메시지는 "기타" 하나로 묶여 보입니다. 나중에 상단의 "세션 고르기"로 언제든 바꿀 수 있습니다.'));
+
+    const tools = el('div', 'pk-tools');
+    const all = el('button', '', '전체 선택'); all.type = 'button';
+    const none = el('button', '', '전체 해제'); none.type = 'button';
+    const cnt = el('span', 'cnt');
+    tools.append(all, none, cnt);
+    wrap.append(tools);
+
+    const list = el('div', 'pk-list');
+    const rows = [];
+    const recentCut = Date.now() - 6 * 3600 * 1000;
+    picker.candidates.forEach((c, i) => {
+      const row = el('div', 'pk-row');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.id = 'pk-c-' + i;
+      cb.checked = picker.needsSetup ? (c.live || c.last > recentCut) : c.selected;
+      const body = el('div', 'pk-body');
+      const nm = el('div', 'pk-name');
+      const inp = document.createElement('input');
+      inp.type = 'text'; inp.id = 'pk-n-' + i; inp.value = c.name; inp.placeholder = c.autoName || '이름';
+      inp.setAttribute('aria-label', '세션 이름');
+      nm.append(inp);
+      if (c.isNew) nm.append(el('span', 'badge', '새 세션'));
+      if (c.live) nm.append(el('span', 'badge live', '작업 중'));
+      const lab = document.createElement('label');
+      lab.htmlFor = cb.id; lab.className = 'pk-meta';
+      lab.textContent = '마지막 활동 ' + fmtFull(c.last) + ' · ' + c.eventCount + ' events' + (c.fileCount ? ' · 수정 파일 ' + c.fileCount + '개' : '') + ' · ' + c.id.slice(0, 8);
+      body.append(nm, lab);
+      if (c.firstPrompt) body.append(el('div', 'pk-first', '첫 질문: ' + c.firstPrompt));
+      if (c.recent && c.recent.length) body.append(el('div', 'pk-recent', '최근: ' + c.recent.join('  ·  ')));
+      row.append(cb, body);
+      const sync = () => { row.classList.toggle('on', cb.checked); count(); };
+      cb.addEventListener('change', sync);
+      rows.push({ c, cb, inp, row });
+      list.append(row);
+    });
+    wrap.append(list);
+    function count() { const n = rows.filter((r) => r.cb.checked).length; cnt.textContent = n + '개 선택'; rows.forEach((r) => r.row.classList.toggle('on', r.cb.checked)); }
+    all.addEventListener('click', () => { rows.forEach((r) => { r.cb.checked = true; }); count(); });
+    none.addEventListener('click', () => { rows.forEach((r) => { r.cb.checked = false; }); count(); });
+    count();
+
+    const hsel = [];
+    if (picker.handles && picker.handles.length) {
+      wrap.append(el('h2', null, '어느 세션인지 모르는 상대'));
+      wrap.append(el('div', 'lead', '메시지를 주고받았지만 어떤 세션인지 자동으로 알아내지 못한 주소입니다. 아는 세션이면 연결해주세요.'));
+      picker.handles.forEach((h, i) => {
+        const r = el('div', 'pk-h');
+        const info = el('div', 'pk-body');
+        info.append(el('div', 'pk-name', h.label + (h.count ? ' · 메시지 ' + h.count + '건' : '')));
+        if (h.sample) info.append(el('div', 'pk-first', h.sample));
+        const sel2 = document.createElement('select');
+        sel2.id = 'pk-h-' + i; sel2.setAttribute('aria-label', h.label + ' 연결할 세션');
+        const o0 = document.createElement('option'); o0.value = ''; o0.textContent = '연결 안 함'; sel2.append(o0);
+        picker.candidates.forEach((c) => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.name || c.autoName || c.id.slice(0, 8); if (h.linked === c.id) o.selected = true; sel2.append(o); });
+        r.append(info, sel2);
+        hsel.push({ h, sel2 });
+        wrap.append(r);
+      });
+    }
+
+    const foot = el('div', 'pk-foot');
+    const cancel = el('button', '', picker.needsSetup ? '나중에' : '취소'); cancel.type = 'button';
+    cancel.addEventListener('click', () => { pickerDismissed = true; closePicker(); });
+    const ok = el('button', 'primary', '그래프에 적용'); ok.type = 'button';
+    ok.addEventListener('click', () => {
+      const names = {}; rows.forEach((r) => { names[r.c.id] = r.inp.value; });
+      const aliases = {}; hsel.forEach(({ h, sel2 }) => { aliases[h.handle] = sel2.value; });
+      vscode.postMessage({ type: 'savePicks', folder: currentFolder, selected: rows.filter((r) => r.cb.checked).map((r) => r.c.id), seen: picker.candidates.map((c) => c.id), names, aliases });
+      picker.needsSetup = false; picker.newCount = 0; // 확장이 새 데이터를 보내기 전에 다시 열리지 않도록
+      sel = null; firstFit = true; closePicker();
+    });
+    foot.append(cancel, ok);
+    wrap.append(foot);
+    box.append(wrap);
+    if (!first && rows[0]) rows[0].inp.focus();
+  }
+
+  function closePicker() {
+    pickerOpen = false;
+    $('picker').hidden = true;
+    updatePickerChrome();
+  }
+
   // ── 상호작용: 노드 드래그, 화면 이동/확대 ──
   function applyView() { $('world').style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.k + ')'; }
 
@@ -486,6 +630,9 @@ function graphHtml() {
   }
 
   $('fit').addEventListener('click', fit);
+  $('pick').addEventListener('click', () => openPicker());
+  $('newpick').addEventListener('click', () => openPicker());
+  $('newignore').addEventListener('click', () => { $('newbar').hidden = true; vscode.postMessage({ type: 'ignoreNew', folder: currentFolder }); });
   $('relayout').addEventListener('click', () => { pos = {}; layout(true); render(); fit(); vscode.postMessage({ type: 'positions', positions: pos }); });
   $('folder').addEventListener('change', (e) => { sel = null; firstFit = true; vscode.postMessage({ type: 'options', options: { folder: e.target.value } }); });
   $('subs').addEventListener('change', (e) => vscode.postMessage({ type: 'options', options: { showSubagents: e.target.checked } }));
@@ -496,6 +643,9 @@ function graphHtml() {
     const m = ev.data;
     if (m.type === 'graph') {
       graph = m.graph;
+      if (m.options.folder !== currentFolder) { pickerDismissed = false; currentFolder = m.options.folder; }
+      picker = m.picker || null;
+      updatePickerChrome();
       pos = Object.assign({}, m.positions || {}, pos);
       $('subs').checked = !!m.options.showSubagents;
       const fsel = $('folder');
@@ -513,6 +663,8 @@ function graphHtml() {
       layout(false);
       render();
       if (firstFit || Object.keys(pos).length !== before) { fit(); firstFit = false; }
+    } else if (m.type === 'openPicker') {
+      openPicker();
     } else if (m.type === 'diffResult') {
       if (diffState && diffState.key === m.key) { diffState.data = m.diff; renderSide(); }
     } else if (m.type === 'focus') {

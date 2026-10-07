@@ -8,7 +8,7 @@ const assert = require('assert');
 
 const root = path.resolve(__dirname, '..');
 const recorder = path.join(root, 'plugin/scripts/record.js');
-const { readEvents, buildSessions, buildGraph, groupByFolder } = require(path.join(root, 'extension/src/store'));
+const { readEvents, buildSessions, buildGraph, groupByFolder, pickCandidates, OTHER } = require(path.join(root, 'extension/src/store'));
 const { scanTranscript, norm } = require(path.join(root, 'extension/src/transcripts'));
 const { graphHtml } = require(path.join(root, 'extension/src/graph'));
 
@@ -129,6 +129,26 @@ assert.ok(!g2.nodes.some((n) => n.id === '@tta-zz'));
 const gx = g2.nodes.find((n) => n.id === '@uds:x');
 assert.ok(gx && gx.label === '@x', '보낸 쪽을 모르는 메시지는 짧은 이름의 유령 노드');
 
+// 세션 고르기: A, B 만 고르면 나머지는 "기타"로
+const gs = buildGraph(sessions, { folder: cwd, transcripts, norm, names: { [A]: '메인 핸들러' }, selected: new Set([A, B]) });
+assert.deepStrictEqual(gs.nodes.map((n) => n.id).sort(), [OTHER, A, B].sort());
+const toOther = gs.edges.find((e) => e.from === A && e.to === OTHER);
+assert.strictEqual(toOther.count, 2, 'A→RAG, A→@tta-zz 가 기타로 합쳐짐');
+assert.ok(toOther.messages.every((m) => m.via), '어느 세션과 오간 건지 via 로 남김');
+assert.ok(!gs.edges.some((e) => e.from === OTHER && e.to === OTHER), '기타끼리 메시지는 안 그림');
+assert.strictEqual(gs.edges.find((e) => e.from === B && e.to === A).count, 2);
+assert.ok(gs.ghostHandles.some((h) => h.handle === 'tta-zz'));
+// 아무도 안 고르면 기타만 남지 않고 빈 그래프
+const g0 = buildGraph(sessions, { folder: cwd, transcripts, norm, selected: new Set() });
+assert.strictEqual(g0.nodes.filter((n) => n.kind === 'session').length, 0);
+// 후보 목록
+const cands = pickCandidates(sessions, cwd, { transcripts, names: { [A]: '메인 핸들러' }, selected: new Set([A]), seen: new Set([A, B]) });
+assert.deepStrictEqual(cands.map((c) => c.id).sort(), [A, B, C].sort(), '빈 세션·다른 폴더 제외');
+assert.strictEqual(cands.find((c) => c.id === C).isNew, true);
+assert.strictEqual(cands.find((c) => c.id === A).selected, true);
+assert.strictEqual(cands.find((c) => c.id === A).firstPrompt, '역할 나눠서 진행해줘');
+assert.strictEqual(cands.find((c) => c.id === B).autoName, 'GNN');
+
 // 서브에이전트 표시
 const g3 = buildGraph(sessions, { folder: cwd, transcripts, norm, showSubagents: true });
 const sub = g3.nodes.find((n) => n.kind === 'subagent');
@@ -183,6 +203,36 @@ if (JSDOM) {
   assert.strictEqual(w.document.querySelectorAll('#side .dl.add').length, 2);
   w.document.querySelector('#side .back').dispatchEvent(new w.Event('click', { bubbles: true }));
   assert.ok(w.document.querySelector('#side .fl'), '돌아가기 → 세션 상세');
+  // 세션 고르기: 처음이면 자동으로 뜨고, 적용하면 저장 요청
+  const picker = { needsSetup: true, newCount: 0, candidates: cands.map((c) => ({ ...c, selected: false })), handles: [{ handle: 'tta-zz', label: '@tta-zz', count: 1, sample: 'TTA 문서 검토 부탁해', linked: '' }] };
+  w.dispatchEvent(new w.MessageEvent('message', { data: { type: 'graph', graph: { nodes: gs.nodes, edges: gs.edges }, positions: {}, options: { showSubagents: false, windowHours: 24, folder: cwd }, folders: [{ folder: cwd, name: 'kftc', count: 3, live: 2 }], picker } }));
+  const pk = w.document.getElementById('picker');
+  assert.strictEqual(pk.hidden, false, '처음엔 고르기 화면이 자동으로 열림');
+  assert.strictEqual(pk.querySelectorAll('.pk-row').length, 3);
+  const bRow = [...pk.querySelectorAll('.pk-row')].find((r) => r.querySelector('input[type=text]').placeholder === 'GNN');
+  bRow.querySelector('input[type=text]').value = 'GNN 학습';
+  pk.querySelectorAll('.pk-tools button')[1].click(); // 전체 해제
+  bRow.querySelector('input[type=checkbox]').click();
+  const hs = pk.querySelector('.pk-h select'); hs.value = C;
+  [...pk.querySelectorAll('.pk-foot button')].pop().click();
+  const saved = posted.filter((m) => m.type === 'savePicks').pop();
+  assert.deepStrictEqual([...saved.selected], [B]);
+  assert.strictEqual(saved.names[B], 'GNN 학습');
+  assert.strictEqual(saved.aliases['tta-zz'], C);
+  assert.strictEqual(saved.seen.length, 3);
+  assert.strictEqual(pk.hidden, true);
+  // 기타 노드 클릭 → 설명
+  const other = [...w.document.querySelectorAll('.node')].find((e) => e.dataset.id === OTHER);
+  assert.ok(other && other.classList.contains('other'));
+  other.dispatchEvent(new w.MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+  other.dispatchEvent(new w.MouseEvent('pointerup', { bubbles: true, button: 0 }));
+  assert.ok(w.document.getElementById('side').textContent.includes('그래프에 넣지 않은 세션'));
+  // 새 세션 알림 띠
+  w.dispatchEvent(new w.MessageEvent('message', { data: { type: 'graph', graph: { nodes: gs.nodes, edges: gs.edges }, positions: {}, options: { showSubagents: false, windowHours: 24, folder: cwd }, folders: [], picker: { ...picker, needsSetup: false, newCount: 1 } } }));
+  assert.strictEqual(w.document.getElementById('newbar').hidden, false);
+  assert.strictEqual(w.document.getElementById('picker').hidden, true, '설정이 끝난 뒤엔 자동으로 안 열림');
+  w.document.getElementById('newignore').click();
+  assert.ok(posted.some((m) => m.type === 'ignoreNew' && m.folder === cwd));
   // 텍스트는 마크업으로 해석되지 않아야 함
   w.dispatchEvent(new w.MessageEvent('message', { data: { type: 'graph', graph: { nodes: [{ ...g3.nodes[0], label: '<img src=x onerror=alert(1)>' }], edges: [] }, positions: {}, options: { showSubagents: false, windowHours: 24 } } }));
   assert.strictEqual(w.document.querySelectorAll('#nodes img').length, 0);

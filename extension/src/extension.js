@@ -3,7 +3,7 @@ const vscode = require('vscode');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { readEvents, buildSessions, sessionView, buildGraph, groupByFolder } = require('./store');
+const { readEvents, buildSessions, sessionView, buildGraph, groupByFolder, pickCandidates } = require('./store');
 const { timelineHtml } = require('./timeline');
 const { graphHtml } = require('./graph');
 const { scanTranscript, norm } = require('./transcripts');
@@ -26,8 +26,8 @@ const namesFile = () => path.join(dataDir(), 'names.json');
 function loadNames() {
   try {
     const o = JSON.parse(fs.readFileSync(namesFile(), 'utf8'));
-    return { names: o.names || {}, aliases: o.aliases || {} };
-  } catch { return { names: {}, aliases: {} }; }
+    return { names: o.names || {}, aliases: o.aliases || {}, picks: o.picks || {} };
+  } catch { return { names: {}, aliases: {}, picks: {} }; }
 }
 function saveNames(v) {
   fs.mkdirSync(dataDir(), { recursive: true });
@@ -256,17 +256,25 @@ function activate(context) {
   function postGraph() {
     if (!graphPanel) return;
     const opts = graphOptions();
-    const { names, aliases } = loadNames();
+    const { names, aliases, picks } = loadNames();
     const transcripts = model.transcripts();
     const folder = currentFolder();
+    const pick = folder ? picks[folder] : undefined;
+    const selected = pick ? new Set(pick.selected || []) : null;
+    const seen = pick ? new Set(pick.seen || []) : null;
     const g = buildGraph(model.sessions, {
-      folder, names, aliases, transcripts, norm,
+      folder, names, aliases, transcripts, norm, selected,
       windowMs: opts.windowHours ? opts.windowHours * 3600 * 1000 : 0,
       showSubagents: opts.showSubagents,
     });
     const folders = folderGroups().map((x) => ({ folder: x.folder, name: x.name, count: x.sessions.length, live: x.live }));
     graphPanel.title = `Session Flow: ${(folders.find((x) => x.folder === folder) || {}).name || ''}`;
-    graphPanel.webview.postMessage({ type: 'graph', graph: { nodes: g.nodes, edges: g.edges }, positions: context.globalState.get(POS_KEY, {}), options: { ...opts, folder }, folders });
+    const candidates = folder ? pickCandidates(model.sessions, folder, { names, transcripts, selected, seen }) : [];
+    const sessionIds = new Set(candidates.map((c) => c.id));
+    const handles = g.ghostHandles.map((h) => ({ ...h, linked: '' }))
+      .concat(Object.entries(aliases).filter(([, sid]) => sessionIds.has(sid)).map(([h, sid]) => ({ handle: h, label: '@' + String(h).replace(/^uds:/, '').split(/[\\/]/).pop().replace(/\.sock$/, ''), count: 0, sample: '', linked: sid })));
+    const picker = { needsSetup: !pick && candidates.length > 0, candidates, handles, newCount: pick ? candidates.filter((c) => c.isNew).length : 0 };
+    graphPanel.webview.postMessage({ type: 'graph', graph: { nodes: g.nodes, edges: g.edges }, positions: context.globalState.get(POS_KEY, {}), options: { ...opts, folder }, folders, picker });
   }
   async function renameSession(id, current) {
     const v = await vscode.window.showInputBox({ title: '세션 이름', prompt: '그래프와 목록에 표시할 이름 (비우면 자동 이름)', value: current || '' });
@@ -276,6 +284,49 @@ function activate(context) {
     saveNames(data);
     model.reload();
   }
+  // 세션 고르기 저장: 그래프에 넣을 세션, 이름, 수신자 연결
+  function savePicks(m) {
+    const data = loadNames();
+    const folder = m.folder || currentFolder();
+    if (!folder) return;
+    data.picks[folder] = { selected: m.selected || [], seen: [...new Set([...(m.seen || []), ...(m.selected || [])])] };
+    for (const [sid, nm] of Object.entries(m.names || {})) {
+      if (nm && nm.trim()) data.names[sid] = nm.trim(); else delete data.names[sid];
+    }
+    for (const [h, sid] of Object.entries(m.aliases || {})) {
+      if (sid) data.aliases[h] = sid; else delete data.aliases[h];
+    }
+    saveNames(data);
+    notified.clear();
+    model.reload();
+  }
+  // 새 세션은 그래프에 넣지 않고 "본 것"으로만 표시
+  function ignoreNew(folder) {
+    const data = loadNames();
+    const pick = data.picks[folder];
+    if (!pick) return;
+    const ids = model.sessions.filter((s) => s.folder === folder && s.activity > 0).map((s) => s.id);
+    pick.seen = [...new Set([...(pick.seen || []), ...ids])];
+    saveNames(data);
+    model.reload();
+  }
+  // A안: 고르기를 한 폴더에 새 세션이 생기면 알림만 띄운다 (자동 추가 안 함)
+  const notified = new Set();
+  function checkNewSessions() {
+    const { picks } = loadNames();
+    for (const [folder, pick] of Object.entries(picks)) {
+      const seen = new Set(pick.seen || []);
+      const fresh = model.sessions.filter((s) => s.folder === folder && s.activity > 0 && !seen.has(s.id) && !notified.has(s.id));
+      if (!fresh.length) continue;
+      fresh.forEach((s) => notified.add(s.id));
+      const name = path.basename(folder);
+      vscode.window.showInformationMessage(`${name}에 새 세션 ${fresh.length}개가 생겼습니다. 그래프에 추가할까요?`, '세션 고르기', '추가 안 함').then((c) => {
+        if (c === '세션 고르기') { openGraph(folder); setTimeout(() => graphPanel && graphPanel.webview.postMessage({ type: 'openPicker' }), 300); }
+        if (c === '추가 안 함') ignoreNew(folder);
+      });
+    }
+  }
+
   async function linkHandle(handle) {
     const items = model.sessions.map((s) => ({ label: s.displayName || s.title, description: s.cwd || '', detail: s.id, id: s.id }));
     const pick = await vscode.window.showQuickPick(items, { title: `@${handle} 은(는) 어느 세션인가요?`, matchOnDescription: true, matchOnDetail: true });
@@ -303,6 +354,8 @@ function activate(context) {
       if (m.type === 'options' && m.options.folder) { graphFolder = m.options.folder; delete m.options.folder; }
       if (m.type === 'options') { context.globalState.update(OPT_KEY, { ...graphOptions(), ...m.options }).then(postGraph); }
       if (m.type === 'rename') renameSession(m.id, m.current);
+      if (m.type === 'savePicks') savePicks(m);
+      if (m.type === 'ignoreNew') ignoreNew(m.folder);
       if (m.type === 'link') linkHandle(m.handle);
     });
   }
@@ -316,7 +369,7 @@ function activate(context) {
     status.show();
   }
 
-  model.onDidChange(() => { updateStatus(); postSession(); postGraph(); });
+  model.onDidChange(() => { updateStatus(); postSession(); postGraph(); checkNewSessions(); });
 
   // events.jsonl 감시 (워크스페이스 밖 경로라 fs.watchFile 폴링 사용)
   let watched;
@@ -339,6 +392,7 @@ function activate(context) {
     vscode.workspace.registerTextDocumentContentProvider(DETAIL_SCHEME, detailProvider),
     vscode.commands.registerCommand('sessionFlow.openTimeline', openTimeline),
     vscode.commands.registerCommand('sessionFlow.openGraph', openGraph),
+    vscode.commands.registerCommand('sessionFlow.pickSessions', (node) => { openGraph(node); setTimeout(() => graphPanel && graphPanel.webview.postMessage({ type: 'openPicker' }), 300); }),
     vscode.commands.registerCommand('sessionFlow.renameSession', (node) => node && node.s && renameSession(node.s.id, node.s.displayName)),
     vscode.commands.registerCommand('sessionFlow.openEvent', openEvent),
     vscode.commands.registerCommand('sessionFlow.refresh', () => model.reload()),

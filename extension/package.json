@@ -2,7 +2,7 @@
   "name": "session-flow",
   "displayName": "Session Flow",
   "description": "Claude Code 세션들이 작업 폴더 안에서 어떻게 주고받는지 그래프로 보고, 수정된 파일을 전/후 diff로 확인합니다.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "tjehdgus",
   "license": "MIT",
   "repository": {
@@ -50,6 +50,11 @@
         "command": "sessionFlow.openGraph",
         "title": "Session Flow: 세션 그래프 열기",
         "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "sessionFlow.pickSessions",
+        "title": "Session Flow: 세션 고르기",
+        "icon": "$(checklist)"
       },
       {
         "command": "sessionFlow.renameSession",
@@ -102,6 +107,11 @@
       "view/item/context": [
         {
           "command": "sessionFlow.openGraph",
+          "when": "view == sessionFlow.sessions && viewItem == folder",
+          "group": "inline"
+        },
+        {
+          "command": "sessionFlow.pickSessions",
           "when": "view == sessionFlow.sessions && viewItem == folder",
           "group": "inline"
         },

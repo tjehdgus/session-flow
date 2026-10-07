@@ -1,7 +1,7 @@
 {
   "name": "session-flow",
   "displayName": "Session Flow",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "세션/서브에이전트의 툴 호출과 파일 변경(전/후)을 로컬 JSONL로 기록합니다. VS Code 확장으로 시각화합니다.",
   "author": {
     "name": "tjehdgus"

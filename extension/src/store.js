@@ -311,15 +311,91 @@ function buildGraph(allSessions, opts = {}) {
     }
   }
 
-  const ids = new Set(nodes.map((n) => n.id));
-  const edges = [...edgeMap.values()]
+  // 어느 세션인지 모르는 수신자/발신자 (고르기 화면에서 연결할 수 있게)
+  const ghostHandles = [...ghosts].map(([id, h]) => {
+    const related = [...edgeMap.values()].filter((ed) => ed.from === id || ed.to === id);
+    const sample = related.flatMap((ed) => ed.messages).sort((a, b) => (b.t || 0) - (a.t || 0))[0];
+    return { handle: h, label: (nodes.find((n) => n.id === id) || {}).label || h, count: related.reduce((x, ed) => x + ed.count, 0), sample: sample ? String(sample.text || '').slice(0, 140) : '' };
+  });
+
+  let finalNodes = nodes;
+  let finalEdges = [...edgeMap.values()];
+
+  // 사용자가 고른 세션만 남기고, 나머지(안 고른 세션·모르는 핸들)는 "기타" 하나로 묶는다
+  if (opts.selected) {
+    const keep = (id) => {
+      const n = nodes.find((x) => x.id === id);
+      if (!n) return null;
+      if (n.kind === 'session') return opts.selected.has(id) ? id : OTHER;
+      if (n.kind === 'subagent') return opts.selected.has(n.parent) ? id : null;
+      return OTHER; // ghost
+    };
+    const merged = new Map();
+    const otherMembers = new Set();
+    for (const ed of finalEdges) {
+      const f = keep(ed.from), t = keep(ed.to);
+      if (!f || !t || f === t) continue;
+      if (f === OTHER) otherMembers.add(ed.from);
+      if (t === OTHER) otherMembers.add(ed.to);
+      const k = `${f}→${t}`;
+      let m = merged.get(k);
+      if (!m) { m = { id: k, from: f, to: t, count: 0, last: 0, messages: [] }; merged.set(k, m); }
+      m.count += ed.count;
+      m.last = Math.max(m.last, ed.last);
+      const via = f === OTHER ? ed.from : t === OTHER ? ed.to : null;
+      const viaLabel = via ? (nodes.find((x) => x.id === via) || {}).label : null;
+      m.messages.push(...ed.messages.map((x) => (viaLabel ? { ...x, via: viaLabel } : x)));
+    }
+    finalNodes = nodes.filter((n) => (n.kind === 'session' && opts.selected.has(n.id)) || (n.kind === 'subagent' && opts.selected.has(n.parent)));
+    // 고른 세션은 활동이 없어도 보여준다
+    for (const sid of opts.selected) {
+      if (finalNodes.some((n) => n.id === sid)) continue;
+      const s = sessions.find((x) => x.id === sid);
+      if (s) finalNodes.push({ id: s.id, kind: 'session', label: names[s.id] || (transcripts[s.id] || {}).title || s.title, sub: '', cwd: s.cwd, live: s.live, eventCount: s.events.length, editCount: s.editCount, fileCount: s.files.size, last: s.end, changedFiles: changedFiles(s), recent: [] });
+    }
+    if (otherMembers.size) {
+      finalNodes.push({ id: OTHER, kind: 'other', label: '기타', sub: `고르지 않은 세션 ${otherMembers.size}개`, live: false, eventCount: 0, editCount: 0, fileCount: 0, recent: [], members: [...otherMembers].map((id) => (nodes.find((x) => x.id === id) || {}).label || id) });
+    }
+    finalEdges = [...merged.values()];
+  }
+
+  const ids = new Set(finalNodes.map((n) => n.id));
+  const edges = finalEdges
     .filter((ed) => ids.has(ed.from) && ids.has(ed.to))
     .map((ed) => ({
       ...ed,
       active: now - ed.last < ACTIVE_EDGE_MS,
       messages: ed.messages.sort((a, b) => (a.t || 0) - (b.t || 0)).map((m) => ({ ...m, t: undefined })),
     }));
-  return { nodes, edges, learned };
+  return { nodes: finalNodes, edges, learned, ghostHandles };
 }
 
-module.exports = { readEvents, buildSessions, sessionView, buildGraph, groupByFolder, parseIncoming, folderOf, changedFiles };
+const OTHER = '@@other';
+
+// 세션 고르기 화면에 띄울 후보: 이 폴더에서 실제로 작업한 세션들
+function pickCandidates(allSessions, folder, { names = {}, transcripts = {}, selected, seen } = {}) {
+  return allSessions
+    .filter((s) => s.folder === folder && (s.activity > 0 || (selected && selected.has(s.id))))
+    .map((s) => {
+      const tr = transcripts[s.id] || {};
+      const first = s.events.find((e) => e.kind === 'prompt' && !e.agent_id && !/^\s*</.test(e.summary || ''));
+      const recent = s.events.filter((e) => !QUIET_KINDS.has(e.kind) && !e.agent_id).slice(-3).reverse()
+        .map((e) => e.kind === 'tool' ? `${e.tool} ${e.file ? e.file.split(/[\\/]/).pop() : (e.summary || '')}` : e.kind === 'message' ? `✉ 보냄: ${e.summary || ''}` : e.kind === 'message_in' ? `✉ 받음: ${e.summary || ''}` : (e.summary || e.kind));
+      return {
+        id: s.id,
+        name: names[s.id] || '',
+        autoName: tr.title || tr.summary || s.title,
+        firstPrompt: first ? first.summary : '',
+        last: s.end,
+        live: s.live,
+        eventCount: s.events.length,
+        fileCount: s.files.size,
+        recent,
+        selected: selected ? selected.has(s.id) : false,
+        isNew: seen ? !seen.has(s.id) : false,
+      };
+    })
+    .sort((a, b) => b.last - a.last);
+}
+
+module.exports = { readEvents, buildSessions, sessionView, buildGraph, groupByFolder, parseIncoming, folderOf, changedFiles, pickCandidates, OTHER };
