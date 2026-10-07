@@ -1,8 +1,8 @@
 {
   "name": "session-flow",
   "displayName": "Session Flow",
-  "description": "Claude Code 세션들이 작업 폴더 안에서 어떻게 주고받는지 그래프로 보고, 수정된 파일을 전/후 diff로 확인합니다.",
-  "version": "0.4.1",
+  "description": "여러 Claude Code 세션을 하네스로 묶어(멤버·역할·메인·메시지 방향) 그래프로 설계하고, 실제 흐름과 파일 전/후 변경을 확인합니다.",
+  "version": "0.5.0",
   "publisher": "tjehdgus",
   "license": "MIT",
   "repository": {
@@ -47,13 +47,18 @@
     },
     "commands": [
       {
+        "command": "sessionFlow.openClaude",
+        "title": "Session Flow: Claude Code에서 열기",
+        "icon": "$(comment-discussion)"
+      },
+      {
         "command": "sessionFlow.openGraph",
         "title": "Session Flow: 세션 그래프 열기",
         "icon": "$(type-hierarchy)"
       },
       {
         "command": "sessionFlow.pickSessions",
-        "title": "Session Flow: 세션 고르기",
+        "title": "Session Flow: 하네스 멤버 고르기",
         "icon": "$(checklist)"
       },
       {
@@ -116,6 +121,11 @@
           "group": "inline"
         },
         {
+          "command": "sessionFlow.openClaude",
+          "when": "view == sessionFlow.sessions && viewItem == session",
+          "group": "inline"
+        },
+        {
           "command": "sessionFlow.openTimeline",
           "when": "view == sessionFlow.sessions && viewItem == session",
           "group": "inline"
@@ -133,6 +143,10 @@
         },
         {
           "command": "sessionFlow.renameSession",
+          "when": "false"
+        },
+        {
+          "command": "sessionFlow.openClaude",
           "when": "false"
         }
       ]

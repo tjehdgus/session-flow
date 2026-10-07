@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const LIVE_WINDOW_MS = 10 * 60 * 1000;
-const QUIET_KINDS = new Set(['session_start', 'session_end', 'stop']);
+const QUIET_KINDS = new Set(['session_start', 'session_end', 'stop', 'harness_brief']);
 // 사람이 친 질문이 아니라 IDE/시스템이 자동으로 넣는 프롬프트 (세션 제목으로 쓰지 않음)
 const AUTO_PROMPT = /^\s*(<|continue from where you left off|continue\.?$|resume\b|\[request interrupted)/i;
 const isHumanPrompt = (e) => e.kind === 'prompt' && !e.agent_id && !AUTO_PROMPT.test(e.summary || '');
@@ -188,7 +188,7 @@ function buildGraph(allSessions, opts = {}) {
   for (const s of sessions) {
     for (const e of s.events) {
       if (e.kind === 'message' && e.target) {
-        sent.push({ from: s.id, toHandle: String(e.target).replace(/^@/, ''), text: e.detail || e.summary || '', summary: e.summary, ts: e.ts, t: e._t, idx: e._idx, agent: e.agent_type });
+        sent.push({ from: s.id, toHandle: String(e.target).replace(/^@/, ''), text: e.detail || e.summary || '', summary: e.summary, ts: e.ts, t: e._t, idx: e._idx, agent: e.agent_type, blocked: !!e.blocked });
       }
       if (e.kind === 'message_in' && e.target) {
         received.push({ receiver: s.id, fromHandle: e.target, key: norm(e.detail || e.summary, 600), ts: e.ts, t: e._t, text: e.detail || e.summary, idx: e._idx });
@@ -243,7 +243,7 @@ function buildGraph(allSessions, opts = {}) {
     if (r) to = r.id;
     else { to = `@${m.toHandle}`; ghosts.set(to, m.toHandle); }
     sentKeys.add(`${m.from}|${to}|${norm(m.text)}`);
-    addMsg(m.from, to, { ts: m.ts, t: m.t, text: m.text, idx: m.idx, dir: 'out' });
+    addMsg(m.from, to, { ts: m.ts, t: m.t, text: m.text, idx: m.idx, dir: 'out', blocked: m.blocked || undefined });
   }
   // 보낸 쪽 기록이 없는 메시지(상대 세션에 플러그인이 아직 안 붙은 경우)는 받은 쪽 기록으로 보충
   for (const r of received) {
@@ -368,6 +368,7 @@ function buildGraph(allSessions, opts = {}) {
     .map((ed) => ({
       ...ed,
       active: now - ed.last < ACTIVE_EDGE_MS,
+      blocked: ed.messages.filter((m) => m.blocked).length,
       messages: ed.messages.sort((a, b) => (a.t || 0) - (b.t || 0)).map((m) => ({ ...m, t: undefined })),
     }));
   return { nodes: finalNodes, edges, learned, ghostHandles };

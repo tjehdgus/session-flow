@@ -1,12 +1,18 @@
 {
   "name": "session-flow",
   "displayName": "Session Flow",
-  "version": "0.4.1",
-  "description": "세션/서브에이전트의 툴 호출과 파일 변경(전/후)을 로컬 JSONL로 기록합니다. VS Code 확장으로 시각화합니다.",
+  "version": "0.5.0",
+  "description": "Claude Code 세션들을 하네스(멤버·역할·메인·메시지 방향)로 묶어 각 세션에 역할을 안내하고, 선택적으로 정한 방향 밖 메시지를 막습니다. 세션 활동과 파일 전/후 변경을 기록합니다.",
   "author": {
     "name": "tjehdgus"
   },
   "repository": "https://github.com/tjehdgus/session-flow",
   "license": "MIT",
-  "keywords": ["hooks", "observability", "diff", "subagents"]
+  "keywords": [
+    "hooks",
+    "harness",
+    "multi-session",
+    "observability",
+    "diff"
+  ]
 }

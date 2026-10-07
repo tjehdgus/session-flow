@@ -8,6 +8,30 @@ Claude Code ──hook──▶ ~/.session-flow/events.jsonl + snapshots/
 VS Code 확장 ──파일 감시───────────┘──▶ 폴더별 세션 그래프 · 타임라인 · diff
 ```
 
+## 하네스
+
+한 작업 폴더의 세션들을 **팀**으로 묶는 기능입니다. 그래프에서 설계하면 프로젝트의 `.claude/session-flow.json`에 저장되고, 각 세션이 그 구성대로 움직이도록 안내합니다.
+
+1. **멤버 고르기**: 함께 일할 세션을 체크하고 이름, 역할, 메인(총괄) 세션을 정합니다.
+2. **방향 편집**: 보내는 세션 → 받는 세션 순서로 노드를 누르면 메시지 방향 화살표가 생깁니다. 화살표를 누르면 지울 수 있습니다.
+3. **세션 안내**: 각 멤버 세션은 시작할 때, 그리고 설정이 바뀐 뒤 첫 질문에서 "당신은 GNN, 역할은 …, 메인은 메인 핸들러, 보낼 수 있는 대상은 …"을 hook으로 전달받습니다.
+4. **차단(선택)**: 상단 **차단**을 켜면 정한 방향 밖으로 보내는 메시지를 hook이 막고, 이유와 허용된 대상을 Claude에게 알려줍니다. 어느 세션인지 아직 모르는 주소는 막지 않습니다.
+5. **흐름 보기**: 실제 오간 메시지가 그려지고, 정한 방향 밖 메시지는 빨간색, 정했지만 아직 오가지 않은 방향은 흐린 점선으로 보입니다.
+6. **세션 열기**: 노드를 더블클릭하면 그 세션의 Claude Code가 열립니다(이미 열려 있으면 그 탭으로 이동).
+
+설정 파일은 git으로 커밋해서 다른 PC와 공유할 수 있습니다. 세션 ID는 PC마다 다르므로, 다른 PC에서는 멤버를 다시 골라야 합니다.
+
+```json
+{
+  "version": 1,
+  "name": "kftc",
+  "enforce": false,
+  "members": [{ "session": "<세션 ID>", "name": "메인 핸들러", "role": "작업 분배와 검토", "main": true }],
+  "edges": [{ "from": "<보내는 세션>", "to": "<받는 세션>" }],
+  "layout": {}
+}
+```
+
 ## 화면
 
 - **사이드바**: 작업 폴더(플로우) → 세션 → 에이전트 → 이벤트. 폴더를 누르면 그 폴더의 세션 그래프가 열립니다.
@@ -91,6 +115,8 @@ claude plugin update session-flow@session-flow
 ```bash
 node test/smoke.js                 # hook 기록 → 세션 빌드 스모크 테스트
 node test/graph.js                 # 여러 세션 메시지 → 그래프 (jsdom 있으면 화면 렌더까지)
+node test/harness.js               # 하네스 hook: 역할 안내, 차단 판정
+node test/extension.js             # 확장 로직을 가짜 VS Code API로 실행
 cd extension && npx @vscode/vsce package --no-dependencies
 ```
 VS Code에서 `extension/` 폴더를 열고 F5로 Extension Development Host 실행.

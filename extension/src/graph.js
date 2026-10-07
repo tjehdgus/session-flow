@@ -19,7 +19,7 @@ function graphHtml() {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Session Graph</title>
 <style nonce="${n}">
-  :root { --accent:#5B9DFF; --edge:#6B7383; --live:#6FD69A; --ghost:#9AA3B2; --sub:#B48CF2; }
+  :root { --accent:#5B9DFF; --edge:#6B7383; --live:#6FD69A; --ghost:#9AA3B2; --sub:#B48CF2; --viol:#F2797B; }
   * { box-sizing: border-box; }
   [hidden] { display:none !important; }
   html, body { margin:0; height:100%; overflow:hidden; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
@@ -95,6 +95,22 @@ function graphHtml() {
   .dl.add { background: rgba(46,160,67,.18); } .dl.add .sg { color:#4CC38A; }
   .dl.del { background: rgba(248,81,73,.16); } .dl.del .sg { color:#F2797B; }
   .note { font-size:12px; opacity:.7; padding:8px 0; }
+  .edge-line.viol { stroke: var(--viol); }
+  .edge-line.plan { stroke: var(--edge); stroke-dasharray:3 6; opacity:.55; }
+  .edge-line.rule { stroke: var(--accent); stroke-width:2.5; }
+  .edge-label.viol { fill: var(--viol); }
+  .node .mb { display:inline-block; margin-left:6px; font-size:10px; font-weight:600; padding:1px 6px; border-radius:999px; background: rgba(240,180,60,.22); color: var(--vscode-foreground); vertical-align:1px; }
+  .node .rl { font-size:11px; opacity:.75; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .node.nonmember { opacity:.55; }
+  .node.connecting { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(91,157,255,.35); }
+  body.edit .node.session { cursor: crosshair; }
+  .seg { display:inline-flex; border:1px solid var(--vscode-panel-border, rgba(127,127,127,.35)); border-radius:6px; overflow:hidden; }
+  .seg button { border-radius:0; background: transparent; color: var(--vscode-foreground); }
+  .seg button[aria-pressed=true] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .chip-on { font-size:11px; padding:2px 8px; border-radius:999px; background: rgba(242,121,123,.2); }
+  .pk-role { width:100%; font: inherit; font-size:12px; padding:4px 8px; border-radius:5px; border:1px solid var(--vscode-input-border, rgba(127,127,127,.35)); background: var(--vscode-input-background, rgba(127,127,127,.08)); color: var(--vscode-input-foreground, var(--vscode-foreground)); }
+  .pk-main { font-size:12px; display:inline-flex; gap:4px; align-items:center; }
+  .warn { font-size:12px; padding:8px 10px; border-radius:8px; background: rgba(242,121,123,.14); line-height:1.5; }
   .node.other { border-style:dotted; opacity:.85; background: transparent; }
   .main { position:relative; }
   .newbar { position:absolute; left:12px; right:12px; top:10px; z-index:5; display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; padding:8px 12px; border-radius:8px; font-size:12px;
@@ -140,7 +156,9 @@ function graphHtml() {
         <option value="168">최근 7일</option>
         <option value="0">전체</option>
       </select></label>
-      <button type="button" id="pick">세션 고르기</button>
+      <span class="seg" role="group" aria-label="모드"><button type="button" id="m-view" aria-pressed="true">흐름 보기</button><button type="button" id="m-edit" aria-pressed="false">방향 편집</button></span>
+      <label id="enf-wrap" hidden><input type="checkbox" id="enforce"> 차단</label>
+      <button type="button" id="pick">멤버 고르기</button>
       <button type="button" id="fit">화면 맞춤</button>
       <button type="button" id="relayout">배치 초기화</button>
     </div>
@@ -172,7 +190,13 @@ function graphHtml() {
   let picker = null;          // 확장에서 받은 고르기 데이터
   let pickerOpen = false;
   let pickerDismissed = false;
-  let currentFolder = '';      // { key, first, last, file, edits, back, data }
+  let currentFolder = '';
+  let H = { exists: false, enforce: false, members: [], edges: [] }; // 하네스 설정
+  let mode = 'view';          // 'view' | 'edit'
+  let connectFrom = null;     // 방향 편집: 화살표 시작 노드
+  const isMember = (id) => H.members.some((m) => m.session === id);
+  const memberOf = (id) => H.members.find((m) => m.session === id);
+  const hasRule = (f, t) => H.edges.some((e) => e.from === f && e.to === t);      // { key, first, last, file, edits, back, data }
   let view = { x: 0, y: 0, k: 1 };
   let firstFit = true;
 
@@ -227,13 +251,18 @@ function graphHtml() {
     for (const n of graph.nodes) {
       const p = pos[n.id] || { x: 0, y: 0 };
       const { w } = size(n);
-      const b = el('button', 'node ' + n.kind + (n.live ? ' live' : '') + (sel && sel.type === 'node' && sel.id === n.id ? ' sel' : ''));
+      const mem = memberOf(n.id);
+      const b = el('button', 'node ' + n.kind + (n.live ? ' live' : '') + (sel && sel.type === 'node' && sel.id === n.id ? ' sel' : '')
+        + (connectFrom === n.id ? ' connecting' : '') + (H.exists && n.kind === 'session' && !mem ? ' nonmember' : ''));
       b.type = 'button';
       b.dataset.id = n.id;
       b.style.left = (p.x - w / 2) + 'px';
       b.style.top = (p.y - size(n).h / 2) + 'px';
-      b.title = (n.cwd || '') + (n.handle ? '  @' + n.handle : '');
-      b.append(el('span', 't', n.label));
+      b.title = (mem && mem.role ? '역할: ' + mem.role + '\\n' : '') + (n.cwd || '') + (n.handle ? '  @' + n.handle : '') + (n.kind === 'session' ? '\\n더블클릭: Claude Code에서 열기' : '');
+      const tt = el('span', 't', n.label);
+      if (mem && mem.main) tt.append(el('span', 'mb', '메인'));
+      b.append(tt);
+      if (mem && mem.role) b.append(el('span', 'rl', mem.role));
       const sub = (n.kind === 'ghost' || n.kind === 'other') ? n.sub : (n.live ? '● 작업 중 · ' : '') + n.eventCount + ' events' + (n.fileCount ? ' · 파일 ' + n.fileCount : '');
       b.append(el('span', 's' + (n.live ? ' on' : ''), sub));
       attachDrag(b, n);
@@ -254,7 +283,7 @@ function graphHtml() {
     const svg = $('edges');
     svg.replaceChildren();
     const defs = document.createElementNS(SVGNS, 'defs');
-    [['ah', 'var(--edge)'], ['ah-a', 'var(--accent)'], ['ah-s', 'var(--vscode-foreground)'], ['ah-p', 'var(--sub)']].forEach(([id, col]) => {
+    [['ah', 'var(--edge)'], ['ah-a', 'var(--accent)'], ['ah-s', 'var(--vscode-foreground)'], ['ah-p', 'var(--sub)'], ['ah-r', 'var(--viol)']].forEach(([id, col]) => {
       const m = document.createElementNS(SVGNS, 'marker');
       m.setAttribute('id', id); m.setAttribute('viewBox', '0 0 10 10'); m.setAttribute('refX', '8'); m.setAttribute('refY', '5');
       m.setAttribute('markerWidth', '7'); m.setAttribute('markerHeight', '7'); m.setAttribute('orient', 'auto-start-reverse');
@@ -263,8 +292,9 @@ function graphHtml() {
     });
     svg.append(defs);
     const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
-    const pairs = new Set(graph.edges.map((e) => e.from + '→' + e.to));
-    for (const e of graph.edges) {
+    const list = edgeList();
+    const pairs = new Set(list.map((e) => e.from + '→' + e.to));
+    for (const e of list) {
       const a = nodeById.get(e.from), b = nodeById.get(e.to);
       if (!a || !b || !pos[a.id] || !pos[b.id]) continue;
       const pa = pos[a.id], pb = pos[b.id];
@@ -280,17 +310,18 @@ function graphHtml() {
       const isSel = sel && sel.type === 'edge' && sel.id === e.id;
       const line = document.createElementNS(SVGNS, 'line');
       line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y); line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);
-      line.setAttribute('class', 'edge-line' + (e.active ? ' active' : '') + (isSel ? ' sel' : '') + (isSub ? ' sub' : ''));
-      line.setAttribute('marker-end', 'url(#' + (isSel ? 'ah-s' : e.active ? 'ah-a' : isSub ? 'ah-p' : 'ah') + ')');
+      line.setAttribute('class', 'edge-line' + (e.active && !e.viol ? ' active' : '') + (isSel ? ' sel' : '') + (isSub ? ' sub' : '') + (e.viol ? ' viol' : '') + (e.plan ? ' plan' : '') + (e.rule ? ' rule' : ''));
+      line.setAttribute('marker-end', 'url(#' + (isSel ? 'ah-s' : e.viol ? 'ah-r' : (e.active || e.rule) ? 'ah-a' : isSub ? 'ah-p' : 'ah') + ')');
       const hit = document.createElementNS(SVGNS, 'line');
       hit.setAttribute('x1', p1.x); hit.setAttribute('y1', p1.y); hit.setAttribute('x2', p2.x); hit.setAttribute('y2', p2.y);
       hit.setAttribute('class', 'edge-hit');
-      const t = document.createElementNS(SVGNS, 'title'); t.textContent = labelOf(e.from) + ' → ' + labelOf(e.to) + ' · ' + e.count + '건'; hit.append(t);
-      hit.addEventListener('click', (ev) => { ev.stopPropagation(); select({ type: 'edge', id: e.id }); });
+      const t = document.createElementNS(SVGNS, 'title');
+      t.textContent = labelOf(e.from) + ' → ' + labelOf(e.to) + (e.rule || e.plan ? ' · 정한 방향' : ' · ' + e.count + '건') + (e.viol ? ' · 하네스 규칙 밖' : ''); hit.append(t);
+      hit.addEventListener('click', (ev) => { ev.stopPropagation(); select(e.rule || e.plan ? { type: 'rule', id: e.id, from: e.from, to: e.to } : { type: 'edge', id: e.id }); });
       const lab = document.createElementNS(SVGNS, 'text');
       const mx = (p1.x + p2.x) / 2 + (both ? nx * 2.2 : -dy * 12), my = (p1.y + p2.y) / 2 + (both ? ny * 2.2 : dx * 12);
-      lab.setAttribute('x', mx); lab.setAttribute('y', my + 4); lab.setAttribute('text-anchor', 'middle'); lab.setAttribute('class', 'edge-label');
-      lab.textContent = String(e.count);
+      lab.setAttribute('x', mx); lab.setAttribute('y', my + 4); lab.setAttribute('text-anchor', 'middle'); lab.setAttribute('class', 'edge-label' + (e.viol ? ' viol' : ''));
+      lab.textContent = e.rule || e.plan ? '' : String(e.count) + (e.blocked ? ' (차단 ' + e.blocked + ')' : '');
       svg.append(line, lab, hit);
     }
   }
@@ -301,6 +332,8 @@ function graphHtml() {
     side.replaceChildren();
     side.classList.toggle('wide', !!(sel && sel.type === 'diff'));
     if (sel && sel.type === 'diff') return renderDiff(side);
+    if (sel && sel.type === 'rule') return renderRuleSide(side);
+    if (mode === 'edit' && (!sel || connectFrom)) return renderEditHelp(side);
     if (!sel) {
       side.append(el('h2', null, $('title').textContent || '세션 사이의 흐름'));
       side.append(el('div', 'muted', '노드를 누르면 세션 상세, 화살표를 누르면 두 세션이 주고받은 메시지가 여기에 나옵니다. 숫자는 메시지 수, 흐르는 점선은 방금(90초 이내) 오간 메시지입니다.'));
@@ -323,12 +356,19 @@ function graphHtml() {
       const back = graph.edges.find((x) => x.from === e.to && x.to === e.from);
       side.append(el('h2', null, labelOf(e.from) + ' → ' + labelOf(e.to)));
       side.append(el('div', 'muted', e.count + '건' + (back ? ' · 반대 방향 ' + back.count + '건' : '') + ' · 마지막 ' + fmtFull(e.last)));
+      if (H.exists && isMember(e.from) && isMember(e.to) && !hasRule(e.from, e.to)) {
+        const w = el('div', 'warn', '하네스에서 정한 방향이 아닙니다.' + (e.blocked ? ' 이 중 ' + e.blocked + '건은 차단됐습니다.' : ''));
+        side.append(w);
+        const allow = el('button', '', '이 방향 허용하기'); allow.type = 'button';
+        allow.addEventListener('click', () => addRule(e.from, e.to));
+        side.append(allow);
+      }
       const msgs = e.messages.map((m) => ({ ...m, from: e.from, to: e.to }))
         .concat(back ? back.messages.map((m) => ({ ...m, from: back.from, to: back.to })) : [])
         .sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
       msgs.forEach((m) => {
         const box = el('div', 'msg' + (m.from === e.from ? ' out' : ''));
-        box.append(el('span', 'h', fmt(m.ts) + ' · ' + labelOf(m.from) + ' → ' + labelOf(m.to) + (m.via ? ' (' + m.via + ')' : '')), el('span', 'b', m.text || ''));
+        box.append(el('span', 'h', fmt(m.ts) + ' · ' + labelOf(m.from) + ' → ' + labelOf(m.to) + (m.via ? ' (' + m.via + ')' : '') + (m.blocked ? ' · 차단됨' : '')), el('span', 'b', m.text || ''));
         side.append(box);
       });
       const row = el('div', 'row');
@@ -362,16 +402,27 @@ function graphHtml() {
       return;
     }
     side.append(el('div', 'muted', [n.cwd, n.handle ? '@' + n.handle : '', n.live ? '작업 중' : '대기', n.eventCount + ' events', n.fileCount ? '수정 파일 ' + n.fileCount + '개' : ''].filter(Boolean).join(' · ')));
+    const mem = memberOf(n.id);
+    if (mem && mem.role) side.append(el('div', null, '역할: ' + mem.role));
     const row = el('div', 'row');
-    const tl = el('button', 'primary', '타임라인 열기'); tl.type = 'button';
-    tl.addEventListener('click', () => vscode.postMessage({ type: 'openTimeline', id: n.kind === 'subagent' ? n.parent : n.id }));
-    row.append(tl);
+    const sid = n.kind === 'subagent' ? n.parent : n.id;
+    const oc = el('button', 'primary', 'Claude Code에서 열기'); oc.type = 'button';
+    oc.addEventListener('click', () => vscode.postMessage({ type: 'openSession', id: sid }));
+    const tl = el('button', '', '타임라인'); tl.type = 'button';
+    tl.addEventListener('click', () => vscode.postMessage({ type: 'openTimeline', id: sid }));
+    row.append(oc, tl);
     if (n.kind === 'session') {
+      if (mem && !mem.main) {
+        const mm = el('button', '', '메인으로 지정'); mm.type = 'button';
+        mm.addEventListener('click', () => { H.members.forEach((x) => { x.main = x.session === n.id; }); vscode.postMessage({ type: 'setMain', id: n.id }); render(); });
+        row.append(mm);
+      }
       const rn = el('button', '', '이름 바꾸기'); rn.type = 'button';
       rn.addEventListener('click', () => vscode.postMessage({ type: 'rename', id: n.id, current: n.label }));
       row.append(rn);
     }
     side.append(row);
+    if (H.exists && n.kind === 'session' && !mem) side.append(el('div', 'muted', '이 세션은 하네스 멤버가 아닙니다. "멤버 고르기"에서 추가할 수 있습니다.'));
     const conns = graph.edges.filter((e) => e.from === n.id || e.to === n.id);
     if (conns.length) {
       side.append(el('div', 'muted', '연결'));
@@ -464,6 +515,72 @@ function graphHtml() {
 
   function select(s) { sel = s; render(); }
 
+  // ── 하네스: 흐름 보기 / 방향 편집 ──
+  function edgeList() {
+    if (mode === 'edit') return H.edges.map((r) => ({ id: 'rule:' + r.from + '→' + r.to, from: r.from, to: r.to, count: 0, rule: true }));
+    const out = graph.edges.map((e) => ({ ...e, viol: H.exists && isMember(e.from) && isMember(e.to) && !hasRule(e.from, e.to) }));
+    const have = new Set(out.map((e) => e.from + '→' + e.to));
+    // 정했지만 아직 메시지가 오가지 않은 방향은 흐린 점선
+    H.edges.forEach((r) => { if (!have.has(r.from + '→' + r.to)) out.push({ id: 'plan:' + r.from + '→' + r.to, from: r.from, to: r.to, count: 0, plan: true }); });
+    return out;
+  }
+
+  function setMode(m) {
+    mode = m; connectFrom = null;
+    document.body.classList.toggle('edit', m === 'edit');
+    $('m-view').setAttribute('aria-pressed', String(m === 'view'));
+    $('m-edit').setAttribute('aria-pressed', String(m === 'edit'));
+    if (m === 'edit' && !H.exists) { openPicker(); return; }
+    sel = null; render();
+  }
+
+  function addRule(from, to) {
+    if (!hasRule(from, to)) H.edges.push({ from, to });
+    vscode.postMessage({ type: 'addRule', from, to });
+    render();
+  }
+  function removeRule(from, to) {
+    H.edges = H.edges.filter((e) => !(e.from === from && e.to === to));
+    vscode.postMessage({ type: 'removeRule', from, to });
+    sel = null; render();
+  }
+
+  // 방향 편집에서 노드를 누르면: 첫 클릭 = 시작, 두 번째 클릭 = 도착
+  function editClick(n) {
+    if (n.kind !== 'session' || !isMember(n.id)) { select({ type: 'node', id: n.id }); return; }
+    if (!connectFrom) { connectFrom = n.id; sel = { type: 'node', id: n.id }; render(); return; }
+    if (connectFrom === n.id) { connectFrom = null; render(); return; }
+    const from = connectFrom; connectFrom = null;
+    addRule(from, n.id);
+    select({ type: 'rule', id: 'rule:' + from + '→' + n.id, from, to: n.id });
+  }
+
+  function renderRuleSide(side) {
+    side.append(el('h2', null, labelOf(sel.from) + ' → ' + labelOf(sel.to)));
+    side.append(el('div', 'muted', '"' + labelOf(sel.from) + '"이(가) "' + labelOf(sel.to) + '"에게 메시지를 보낼 수 있는 방향입니다.'));
+    const row = el('div', 'row');
+    const rm = el('button', '', '이 방향 지우기'); rm.type = 'button';
+    rm.addEventListener('click', () => removeRule(sel.from, sel.to));
+    row.append(rm);
+    if (!hasRule(sel.to, sel.from)) {
+      const rev = el('button', '', '반대 방향도 추가'); rev.type = 'button';
+      rev.addEventListener('click', () => addRule(sel.to, sel.from));
+      row.append(rev);
+    }
+    side.append(row);
+  }
+
+  function renderEditHelp(side) {
+    side.append(el('h2', null, '방향 편집'));
+    side.append(el('div', 'muted', connectFrom
+      ? '"' + labelOf(connectFrom) + '"에서 보낼 대상 노드를 누르세요. 같은 노드를 다시 누르거나 Esc로 취소합니다.'
+      : '보내는 세션을 누른 다음 받는 세션을 누르면 화살표가 생깁니다. 화살표를 누르면 지울 수 있습니다. 바꾼 내용은 바로 저장되고, 각 세션에는 다음 질문부터 역할과 연락 대상이 안내됩니다.'));
+    const main = H.members.find((m) => m.main);
+    side.append(el('div', 'muted', '메인: ' + (main ? (main.name || labelOf(main.session)) : '없음 (노드를 누르고 "메인으로 지정")') + ' · 방향 ' + H.edges.length + '개'));
+    side.append(el('div', 'muted', '차단: ' + (H.enforce ? '켜짐 — 정한 방향 밖으로 보내는 메시지를 막습니다.' : '꺼짐 — 안내만 하고 막지 않습니다. 상단 "차단"으로 켤 수 있습니다.')));
+    side.append(el('div', 'muted', '설정 파일: ' + (H.path || '.claude/session-flow.json') + ' (git으로 공유 가능)'));
+  }
+
   // ── 세션 고르기 ──
   function updatePickerChrome() {
     const nc = picker ? picker.newCount : 0;
@@ -481,8 +598,8 @@ function graphHtml() {
     box.hidden = false;
     const wrap = el('div', 'pk');
     const fname = (currentFolder || '').split(/[\\/]/).pop();
-    wrap.append(el('h2', null, '세션 고르기 · ' + fname));
-    wrap.append(el('div', 'lead', '그래프에 넣을 세션을 체크하고 알아보기 쉬운 이름을 붙이세요. 고르지 않은 세션과 오간 메시지는 "기타" 하나로 묶여 보입니다. 나중에 상단의 "세션 고르기"로 언제든 바꿀 수 있습니다.'));
+    wrap.append(el('h2', null, '하네스 멤버 고르기 · ' + fname));
+    wrap.append(el('div', 'lead', '이 폴더에서 함께 일할 세션을 체크하고 이름과 역할을 적은 뒤, 총괄할 세션 하나를 "메인"으로 정하세요. 저장하면 프로젝트의 .claude/session-flow.json 에 기록되고, 각 세션에는 다음 질문부터 자기 역할과 연락 대상이 안내됩니다. 메시지 방향은 그다음 "방향 편집"에서 그립니다.'));
 
     const tools = el('div', 'pk-tools');
     const all = el('button', '', '전체 선택'); all.type = 'button';
@@ -505,18 +622,26 @@ function graphHtml() {
       inp.type = 'text'; inp.id = 'pk-n-' + i; inp.value = c.name; inp.placeholder = c.autoName || '이름';
       inp.setAttribute('aria-label', '세션 이름');
       nm.append(inp);
+      const mainLab = document.createElement('label'); mainLab.className = 'pk-main';
+      const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'pk-main'; radio.id = 'pk-m-' + i; radio.checked = !!c.main;
+      mainLab.append(radio, document.createTextNode('메인'));
+      nm.append(mainLab);
       if (c.isNew) nm.append(el('span', 'badge', '새 세션'));
       if (c.live) nm.append(el('span', 'badge live', '작업 중'));
       const lab = document.createElement('label');
       lab.htmlFor = cb.id; lab.className = 'pk-meta';
       lab.textContent = '마지막 활동 ' + fmtFull(c.last) + ' · ' + c.eventCount + ' events' + (c.fileCount ? ' · 수정 파일 ' + c.fileCount + '개' : '') + ' · ' + c.id.slice(0, 8);
-      body.append(nm, lab);
+      const role = document.createElement('input');
+      role.type = 'text'; role.id = 'pk-r-' + i; role.className = 'pk-role'; role.value = c.role || '';
+      role.placeholder = '역할 (예: GNN 학습 담당, 결과는 메인에 보고)'; role.setAttribute('aria-label', '역할');
+      radio.addEventListener('change', () => { if (radio.checked) { cb.checked = true; count(); } });
+      body.append(nm, role, lab);
       if (c.firstPrompt) body.append(el('div', 'pk-first', '첫 질문: ' + c.firstPrompt));
       if (c.recent && c.recent.length) body.append(el('div', 'pk-recent', '최근: ' + c.recent.join('  ·  ')));
       row.append(cb, body);
       const sync = () => { row.classList.toggle('on', cb.checked); count(); };
       cb.addEventListener('change', sync);
-      rows.push({ c, cb, inp, row });
+      rows.push({ c, cb, inp, row, role, radio });
       list.append(row);
     });
     wrap.append(list);
@@ -550,8 +675,14 @@ function graphHtml() {
     const ok = el('button', 'primary', '그래프에 적용'); ok.type = 'button';
     ok.addEventListener('click', () => {
       const names = {}; rows.forEach((r) => { names[r.c.id] = r.inp.value; });
+      const roles = {}; rows.forEach((r) => { roles[r.c.id] = r.role.value.trim(); });
+      const mainRow = rows.find((r) => r.radio.checked && r.cb.checked);
       const aliases = {}; hsel.forEach(({ h, sel2 }) => { aliases[h.handle] = sel2.value; });
-      vscode.postMessage({ type: 'savePicks', folder: currentFolder, selected: rows.filter((r) => r.cb.checked).map((r) => r.c.id), seen: picker.candidates.map((c) => c.id), names, aliases });
+      const selected = rows.filter((r) => r.cb.checked).map((r) => r.c.id);
+      vscode.postMessage({ type: 'savePicks', folder: currentFolder, selected, seen: picker.candidates.map((c) => c.id), names, aliases, roles, main: mainRow ? mainRow.c.id : null });
+      // 확장이 새 설정을 보내기 전에도 화면이 맞게 보이도록 바로 반영
+      H = { ...H, exists: true, members: selected.map((id) => ({ session: id, name: names[id] || '', role: roles[id] || '', main: !!(mainRow && mainRow.c.id === id) })), edges: H.edges.filter((e) => selected.includes(e.from) && selected.includes(e.to)) };
+      $('enf-wrap').hidden = false;
       picker.needsSetup = false; picker.newCount = 0; // 확장이 새 데이터를 보내기 전에 다시 열리지 않도록
       sel = null; firstFit = true; closePicker();
     });
@@ -590,11 +721,12 @@ function graphHtml() {
       const up = () => {
         b.removeEventListener('pointermove', move); b.removeEventListener('pointerup', up);
         if (moved) vscode.postMessage({ type: 'positions', positions: pos });
+        else if (mode === 'edit') editClick(n);
         else select({ type: 'node', id: n.id });
       };
       b.addEventListener('pointermove', move); b.addEventListener('pointerup', up);
     });
-    b.addEventListener('dblclick', () => { if (n.kind !== 'ghost') vscode.postMessage({ type: 'openTimeline', id: n.kind === 'subagent' ? n.parent : n.id }); });
+    b.addEventListener('dblclick', () => { if (n.kind === 'session' || n.kind === 'subagent') vscode.postMessage({ type: 'openSession', id: n.kind === 'subagent' ? n.parent : n.id }); });
     b.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); select({ type: 'node', id: n.id }); } });
   }
 
@@ -631,6 +763,10 @@ function graphHtml() {
 
   $('fit').addEventListener('click', fit);
   $('pick').addEventListener('click', () => openPicker());
+  $('m-view').addEventListener('click', () => setMode('view'));
+  $('m-edit').addEventListener('click', () => setMode('edit'));
+  $('enforce').addEventListener('change', (e) => { H.enforce = e.target.checked; vscode.postMessage({ type: 'setEnforce', on: e.target.checked }); renderSide(); });
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && connectFrom) { connectFrom = null; render(); } });
   $('newpick').addEventListener('click', () => openPicker());
   $('newignore').addEventListener('click', () => { $('newbar').hidden = true; vscode.postMessage({ type: 'ignoreNew', folder: currentFolder }); });
   $('relayout').addEventListener('click', () => { pos = {}; layout(true); render(); fit(); vscode.postMessage({ type: 'positions', positions: pos }); });
@@ -645,6 +781,10 @@ function graphHtml() {
       graph = m.graph;
       if (m.options.folder !== currentFolder) { pickerDismissed = false; currentFolder = m.options.folder; }
       picker = m.picker || null;
+      H = m.harness || { exists: false, enforce: false, members: [], edges: [] };
+      $('enf-wrap').hidden = !H.exists;
+      $('enforce').checked = !!H.enforce;
+      if (!H.exists && mode === 'edit') setMode('view');
       updatePickerChrome();
       pos = Object.assign({}, m.positions || {}, pos);
       $('subs').checked = !!m.options.showSubagents;
@@ -658,7 +798,7 @@ function graphHtml() {
       $('title').textContent = cur ? cur.name + ' 플로우' : '세션 그래프';
       $('title').title = cur ? cur.folder : '';
       $('win').value = String(m.options.windowHours);
-      if (sel && sel.type !== 'diff' && !(sel.type === 'node' ? graph.nodes.some((n) => n.id === sel.id) : graph.edges.some((e) => e.id === sel.id))) sel = null;
+      if (sel && sel.type !== 'diff' && sel.type !== 'rule' && !(sel.type === 'node' ? graph.nodes.some((n) => n.id === sel.id) : graph.edges.some((e) => e.id === sel.id))) sel = null;
       const before = Object.keys(pos).length;
       layout(false);
       render();

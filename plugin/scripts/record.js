@@ -11,12 +11,15 @@ const path = require('path');
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const AGENT_TOOLS = new Set(['Agent', 'Task']);
+const H = require('./harness');
 const MAX_TEXT = 4000;
 const MAX_SNAPSHOT_BYTES = 1024 * 1024;
 
 const baseDir = process.env.SESSION_FLOW_DIR || path.join(os.homedir(), '.session-flow');
 const eventsFile = path.join(baseDir, 'events.jsonl');
 const snapDir = path.join(baseDir, 'snapshots');
+const handlesFile = path.join(baseDir, 'handles.json');     // 확장이 알아낸 주소 → 세션 매핑
+const stateFile = path.join(baseDir, 'harness-state.json'); // 세션별로 마지막에 알려준 하네스 설정
 
 function truncate(s, n = MAX_TEXT) {
   if (s == null) return undefined;
@@ -183,8 +186,39 @@ function handle(h) {
       break;
   }
 
-  if (!out.length) return;
-  fs.appendFileSync(eventsFile, out.map((o) => JSON.stringify(o)).join('\n') + '\n');
+  // ── 하네스: 역할 안내 / 차단 ──
+  let response = null;
+  const wantsHarness = ev === 'SessionStart' || ev === 'UserPromptSubmit' || (ev === 'PreToolUse' && tool === 'SendMessage');
+  const found = wantsHarness ? H.findConfig(h.cwd) : null;
+  if (found) {
+    const handles = H.readJson(handlesFile, {});
+    const sid = h.session_id;
+    if ((ev === 'SessionStart' || ev === 'UserPromptSubmit') && !h.agent_id) {
+      const ctx = H.contextFor(found, sid, handles);
+      if (ctx) {
+        const state = H.readJson(stateFile, {});
+        const hash = H.configHash(found, handles, sid);
+        // 시작할 때는 항상, 그 뒤로는 설정이 바뀌었을 때만 다시 알려준다
+        if (ev === 'SessionStart' || state[sid] !== hash) {
+          response = { hookSpecificOutput: { hookEventName: ev, additionalContext: ctx } };
+          state[sid] = hash;
+          try { fs.writeFileSync(stateFile, JSON.stringify(state)); } catch { /* ignore */ }
+          out.push({ ...base(h), kind: 'harness_brief', summary: '하네스 역할 안내', detail: ctx });
+        }
+      }
+    }
+    if (ev === 'PreToolUse' && tool === 'SendMessage') {
+      const res = H.checkSend(found, sid, input.to || input.recipient, handles);
+      if (!res.ok) {
+        response = { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: res.reason } };
+        const rec = out.find((o) => o.kind === 'message');
+        if (rec) { rec.blocked = true; rec.block_reason = res.reason; }
+      }
+    }
+  }
+
+  if (out.length) fs.appendFileSync(eventsFile, out.map((o) => JSON.stringify(o)).join('\n') + '\n');
+  return response;
 }
 
 function main() {
@@ -194,7 +228,8 @@ function main() {
   process.stdin.on('end', () => {
     try {
       fs.mkdirSync(snapDir, { recursive: true });
-      handle(JSON.parse(raw));
+      const response = handle(JSON.parse(raw));
+      if (response) process.stdout.write(JSON.stringify(response));
     } catch (e) {
       try {
         fs.mkdirSync(baseDir, { recursive: true });

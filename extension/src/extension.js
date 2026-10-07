@@ -8,6 +8,7 @@ const { timelineHtml } = require('./timeline');
 const { graphHtml } = require('./graph');
 const { scanTranscript, norm } = require('./transcripts');
 const { diffLines } = require('./diff');
+const harness = require('./harness');
 
 const SNAP_SCHEME = 'session-flow-snap';
 const DETAIL_SCHEME = 'session-flow-detail';
@@ -269,21 +270,30 @@ function activate(context) {
     const transcripts = model.transcripts();
     const folder = currentFolder();
     const pick = folder ? picks[folder] : undefined;
-    const selected = pick ? new Set(pick.selected || []) : null;
-    const seen = pick ? new Set(pick.seen || []) : null;
+    const cfg = harness.load(folder);
+    // 하네스가 있으면 멤버가 곧 그래프에 넣을 세션. 이름도 하네스 쪽이 우선
+    const selected = cfg ? new Set(cfg.members.map((x) => x.session)) : (pick ? new Set(pick.selected || []) : null);
+    const seen = new Set([...(pick ? pick.seen || [] : []), ...(cfg ? cfg.members.map((x) => x.session) : [])]);
+    const allNames = { ...names };
+    if (cfg) cfg.members.forEach((x) => { if (x.name) allNames[x.session] = x.name; });
     const g = buildGraph(model.sessions, {
-      folder, names, aliases, transcripts, norm, selected,
+      folder, names: allNames, aliases, transcripts, norm, selected,
       windowMs: opts.windowHours ? opts.windowHours * 3600 * 1000 : 0,
       showSubagents: opts.showSubagents,
     });
     const folders = folderGroups().map((x) => ({ folder: x.folder, name: x.name, count: x.sessions.length, live: x.live }));
     graphPanel.title = `Session Flow: ${(folders.find((x) => x.folder === folder) || {}).name || ''}`;
-    const candidates = folder ? pickCandidates(model.sessions, folder, { names, transcripts, selected, seen }) : [];
+    const candidates = folder ? pickCandidates(model.sessions, folder, { names: allNames, transcripts, selected, seen }) : [];
+    if (cfg) candidates.forEach((c) => { const mm = cfg.members.find((x) => x.session === c.id); if (mm) { c.role = mm.role; c.main = mm.main; } });
+    persistHandles(g.learned, aliases);
     const sessionIds = new Set(candidates.map((c) => c.id));
     const handles = g.ghostHandles.map((h) => ({ ...h, linked: '' }))
       .concat(Object.entries(aliases).filter(([, sid]) => sessionIds.has(sid)).map(([h, sid]) => ({ handle: h, label: '@' + String(h).replace(/^uds:/, '').split(/[\\/]/).pop().replace(/\.sock$/, ''), count: 0, sample: '', linked: sid })));
-    const picker = { needsSetup: !pick && candidates.length > 0, candidates, handles, newCount: pick ? candidates.filter((c) => c.isNew).length : 0 };
-    graphPanel.webview.postMessage({ type: 'graph', graph: { nodes: g.nodes, edges: g.edges }, positions: context.globalState.get(POS_KEY, {}), options: { ...opts, folder }, folders, picker });
+    const configured = !!(cfg || pick);
+    const picker = { needsSetup: !configured && candidates.length > 0, candidates, handles, newCount: configured ? candidates.filter((c) => c.isNew).length : 0 };
+    const hv = cfg ? { exists: true, enforce: cfg.enforce, members: cfg.members, edges: cfg.edges, path: harness.REL } : { exists: false, enforce: false, members: [], edges: [], path: harness.REL };
+    const positions = { ...context.globalState.get(POS_KEY, {}), ...(cfg ? cfg.layout : {}) };
+    graphPanel.webview.postMessage({ type: 'graph', graph: { nodes: g.nodes, edges: g.edges }, positions, options: { ...opts, folder }, folders, picker, harness: hv });
   }
   async function renameSession(id, current) {
     const v = await vscode.window.showInputBox({ title: '세션 이름', prompt: '그래프와 목록에 표시할 이름 (비우면 자동 이름)', value: current || '' });
@@ -291,6 +301,11 @@ function activate(context) {
     const data = loadNames();
     if (v.trim()) data.names[id] = v.trim(); else delete data.names[id];
     saveNames(data);
+    // 하네스 멤버면 프로젝트 설정의 이름도 바꾼다 (세션 안내 문구에 쓰임)
+    const s = model.find(id);
+    const cfg = s && harness.load(s.folder);
+    const mem = cfg && cfg.members.find((x) => x.session === id);
+    if (mem) { mem.name = v.trim(); try { harness.save(s.folder, cfg); } catch { /* ignore */ } }
     model.reload();
   }
   // 세션 고르기 저장: 그래프에 넣을 세션, 이름, 수신자 연결
@@ -302,6 +317,10 @@ function activate(context) {
     for (const [sid, nm] of Object.entries(m.names || {})) {
       if (nm && nm.trim()) data.names[sid] = nm.trim(); else delete data.names[sid];
     }
+    // 하네스 설정(프로젝트 폴더): 멤버·이름·역할·메인. 기존 방향/배치는 유지
+    const cfg = harness.load(folder) || { name: path.basename(folder), enforce: false, members: [], edges: [], layout: {} };
+    cfg.members = (m.selected || []).map((sid) => ({ session: sid, name: (m.names || {})[sid] || '', role: (m.roles || {})[sid] || '', main: m.main === sid }));
+    try { harness.save(folder, cfg); } catch (e) { vscode.window.showErrorMessage(`하네스 설정을 저장하지 못했습니다: ${e.message}`); }
     for (const [h, sid] of Object.entries(m.aliases || {})) {
       if (sid) data.aliases[h] = sid; else delete data.aliases[h];
     }
@@ -312,8 +331,7 @@ function activate(context) {
   // 새 세션은 그래프에 넣지 않고 "본 것"으로만 표시
   function ignoreNew(folder) {
     const data = loadNames();
-    const pick = data.picks[folder];
-    if (!pick) return;
+    const pick = data.picks[folder] || (data.picks[folder] = { selected: [], seen: [] });
     const ids = model.sessions.filter((s) => s.folder === folder && s.activity > 0).map((s) => s.id);
     pick.seen = [...new Set([...(pick.seen || []), ...ids])];
     saveNames(data);
@@ -323,8 +341,11 @@ function activate(context) {
   const notified = new Set();
   function checkNewSessions() {
     const { picks } = loadNames();
-    for (const [folder, pick] of Object.entries(picks)) {
-      const seen = new Set(pick.seen || []);
+    const folders = new Set([...Object.keys(picks), ...folderGroups().map((g) => g.folder).filter((f) => harness.load(f))]);
+    for (const folder of folders) {
+      const pick = picks[folder] || {};
+      const cfg = harness.load(folder);
+      const seen = new Set([...(pick.seen || []), ...(cfg ? cfg.members.map((x) => x.session) : [])]);
       const fresh = model.sessions.filter((s) => s.folder === folder && s.activity > 0 && !seen.has(s.id) && !notified.has(s.id));
       if (!fresh.length) continue;
       fresh.forEach((s) => notified.add(s.id));
@@ -333,6 +354,52 @@ function activate(context) {
         if (c === '세션 고르기') { openGraph(folder); setTimeout(() => graphPanel && graphPanel.webview.postMessage({ type: 'openPicker' }), 300); }
         if (c === '추가 안 함') ignoreNew(folder);
       });
+    }
+  }
+
+  // 하네스 편집 (그래프에서 오는 요청)
+  function editHarness(fn) {
+    const folder = currentFolder();
+    if (!folder) return;
+    const cfg = harness.load(folder);
+    if (!cfg) { vscode.window.showWarningMessage('먼저 "멤버 고르기"로 하네스에 넣을 세션을 정해주세요.'); return; }
+    fn(cfg);
+    try { harness.save(folder, cfg); } catch (e) { vscode.window.showErrorMessage(`하네스 설정을 저장하지 못했습니다: ${e.message}`); return; }
+    postGraph();
+  }
+  let layoutTimer;
+  function saveLayout(positions) {
+    clearTimeout(layoutTimer);
+    layoutTimer = setTimeout(() => {
+      const folder = currentFolder();
+      const cfg = folder && harness.load(folder);
+      if (!cfg) return;
+      cfg.layout = Object.fromEntries(cfg.members.filter((x) => positions[x.session]).map((x) => [x.session, positions[x.session]]));
+      try { harness.save(folder, cfg); } catch { /* ignore */ }
+    }, 800);
+  }
+  // hook 이 차단 판정에 쓸 수 있도록, 알아낸 주소(kftc-3f 등) → 세션 매핑을 공유한다
+  let lastHandles = '';
+  function persistHandles(learned, aliases) {
+    const merged = { ...learned, ...aliases };
+    const txt = JSON.stringify(merged);
+    if (txt === lastHandles) return;
+    lastHandles = txt;
+    try { fs.mkdirSync(dataDir(), { recursive: true }); fs.writeFileSync(path.join(dataDir(), 'handles.json'), JSON.stringify(merged, null, 2)); } catch { /* ignore */ }
+  }
+  // 더블클릭: 그 세션의 Claude Code 를 연다 (이미 열려 있으면 그 탭으로 이동)
+  async function openClaudeSession(id) {
+    const uri = vscode.Uri.parse(`${vscode.env.uriScheme}://anthropic.claude-code/open?session=${encodeURIComponent(id)}`);
+    let ok = false;
+    try { ok = await vscode.env.openExternal(uri); } catch { ok = false; }
+    if (!ok) {
+      const s = model.find(id);
+      const pickTerm = await vscode.window.showWarningMessage('Claude Code 확장으로 세션을 열지 못했습니다. 터미널에서 이어서 열까요? 이미 다른 곳에 열려 있으면 대화가 섞일 수 있습니다.', '터미널에서 열기');
+      if (pickTerm) {
+        const t = vscode.window.createTerminal({ name: `Claude: ${(s && s.displayName) || id.slice(0, 8)}`, cwd: s && s.cwd });
+        t.show();
+        t.sendText(`claude --resume ${id}`);
+      }
     }
   }
 
@@ -359,11 +426,16 @@ function activate(context) {
       if (m.type === 'openDiff') openRangeDiff(m.first, m.last);
       if (m.type === 'openFile' && m.file) vscode.window.showTextDocument(vscode.Uri.file(m.file), { preview: true });
       if (m.type === 'openTimeline') { const s = model.find(m.id); if (s) openTimeline({ s }); }
-      if (m.type === 'positions') context.globalState.update(POS_KEY, m.positions);
+      if (m.type === 'positions') { context.globalState.update(POS_KEY, m.positions); saveLayout(m.positions); }
       if (m.type === 'options' && m.options.folder) { graphFolder = m.options.folder; delete m.options.folder; }
       if (m.type === 'options') { context.globalState.update(OPT_KEY, { ...graphOptions(), ...m.options }).then(postGraph); }
       if (m.type === 'rename') renameSession(m.id, m.current);
       if (m.type === 'savePicks') savePicks(m);
+      if (m.type === 'openSession') openClaudeSession(m.id);
+      if (m.type === 'addRule') editHarness((c) => { if (!c.edges.some((e) => e.from === m.from && e.to === m.to)) c.edges.push({ from: m.from, to: m.to }); });
+      if (m.type === 'removeRule') editHarness((c) => { c.edges = c.edges.filter((e) => !(e.from === m.from && e.to === m.to)); });
+      if (m.type === 'setMain') editHarness((c) => { c.members.forEach((x) => { x.main = x.session === m.id; }); });
+      if (m.type === 'setEnforce') editHarness((c) => { c.enforce = !!m.on; });
       if (m.type === 'ignoreNew') ignoreNew(m.folder);
       if (m.type === 'link') linkHandle(m.handle);
     });
@@ -402,6 +474,7 @@ function activate(context) {
     vscode.commands.registerCommand('sessionFlow.openTimeline', openTimeline),
     vscode.commands.registerCommand('sessionFlow.openGraph', openGraph),
     vscode.commands.registerCommand('sessionFlow.pickSessions', (node) => { openGraph(node); setTimeout(() => graphPanel && graphPanel.webview.postMessage({ type: 'openPicker' }), 300); }),
+    vscode.commands.registerCommand('sessionFlow.openClaude', (node) => node && node.s && openClaudeSession(node.s.id)),
     vscode.commands.registerCommand('sessionFlow.renameSession', (node) => node && node.s && renameSession(node.s.id, node.s.displayName)),
     vscode.commands.registerCommand('sessionFlow.openEvent', openEvent),
     vscode.commands.registerCommand('sessionFlow.refresh', () => model.reload()),

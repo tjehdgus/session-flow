@@ -233,6 +233,62 @@ if (JSDOM) {
   assert.strictEqual(w.document.getElementById('picker').hidden, true, '설정이 끝난 뒤엔 자동으로 안 열림');
   w.document.getElementById('newignore').click();
   assert.ok(posted.some((m) => m.type === 'ignoreNew' && m.folder === cwd));
+  // ── 하네스 ──
+  const harnessMsg = (h, extra = {}) => ({ type: 'graph', graph: { nodes: g.nodes.filter((n) => n.kind === 'session'), edges: g.edges.filter((e) => [A, B, C].includes(e.from) && [A, B, C].includes(e.to)) }, positions: {}, options: { showSubagents: false, windowHours: 24, folder: cwd }, folders: [], picker: { needsSetup: false, newCount: 0, candidates: cands.map((c) => ({ ...c, role: c.id === B ? 'GNN 학습' : '', main: c.id === A })), handles: [] }, harness: h, ...extra });
+  const H0 = { exists: true, enforce: false, members: [{ session: A, name: '메인 핸들러', role: '총괄', main: true }, { session: B, name: 'GNN', role: 'GNN 학습' }, { session: C, name: 'RAG 및 LLM', role: '' }], edges: [{ from: A, to: B }, { from: C, to: A }], path: '.claude/session-flow.json' };
+  w.dispatchEvent(new w.MessageEvent('message', { data: harnessMsg(H0) }));
+  const D = w.document;
+  assert.strictEqual(D.getElementById('enf-wrap').hidden, false, '하네스가 있으면 차단 토글 표시');
+  const nodeA = [...D.querySelectorAll('.node')].find((e) => e.dataset.id === A);
+  assert.ok(nodeA.querySelector('.mb'), '메인 배지');
+  assert.ok([...D.querySelectorAll('.node .rl')].some((e) => e.textContent === 'GNN 학습'), '역할 표시');
+  // 보기 모드: 규칙 밖 메시지는 빨간색, 메시지 없는 규칙은 점선
+  assert.ok(D.querySelectorAll('line.edge-line.viol').length >= 1, 'GNN→메인은 규칙 밖');
+  assert.strictEqual(D.querySelectorAll('line.edge-line.plan').length, 1, 'RAG→메인은 정했지만 아직 메시지 없음');
+  // 더블클릭 → Claude Code 열기
+  nodeA.dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true }));
+  assert.ok(posted.some((m) => m.type === 'openSession' && m.id === A));
+  // 규칙 밖 화살표 → "이 방향 허용하기"
+  const violHit = [...D.querySelectorAll('line.edge-hit')].find((l) => l.textContent.startsWith('GNN → 메인 핸들러') && l.textContent.includes('규칙 밖'));
+  violHit.dispatchEvent(new w.Event('click', { bubbles: true }));
+  assert.ok(D.querySelector('#side .warn'));
+  [...D.querySelectorAll('#side button')].find((b) => b.textContent === '이 방향 허용하기').click();
+  const added = posted.filter((m) => m.type === 'addRule').pop();
+  assert.ok(added && added.from === B && added.to === A);
+  // 방향 편집 모드
+  D.getElementById('m-edit').click();
+  assert.ok(D.body.classList.contains('edit'));
+  assert.strictEqual(D.querySelectorAll('line.edge-line.rule').length, 3, '편집 모드는 정한 방향만');
+  const click = (id) => { const e = [...D.querySelectorAll('.node')].find((x) => x.dataset.id === id); e.dispatchEvent(new w.MouseEvent('pointerdown', { bubbles: true, button: 0 })); e.dispatchEvent(new w.MouseEvent('pointerup', { bubbles: true, button: 0 })); };
+  click(B);
+  assert.ok([...D.querySelectorAll('.node')].find((x) => x.dataset.id === B).classList.contains('connecting'));
+  click(C);
+  const r2 = posted.filter((m) => m.type === 'addRule').pop();
+  assert.ok(r2.from === B && r2.to === C, '노드 두 번 클릭으로 방향 추가');
+  assert.ok(D.getElementById('side').textContent.includes('GNN → RAG 및 LLM'));
+  [...D.querySelectorAll('#side button')].find((b) => b.textContent === '이 방향 지우기').click();
+  const rm = posted.filter((m) => m.type === 'removeRule').pop();
+  assert.ok(rm.from === B && rm.to === C);
+  // 차단 토글
+  D.getElementById('enforce').click();
+  assert.ok(posted.some((m) => m.type === 'setEnforce' && m.on === true));
+  // 메인으로 지정
+  D.getElementById('m-view').click();
+  click(B);
+  [...D.querySelectorAll('#side button')].find((b) => b.textContent === '메인으로 지정').click();
+  assert.ok(posted.some((m) => m.type === 'setMain' && m.id === B));
+  // 멤버 고르기: 역할·메인 함께 저장
+  D.getElementById('pick').click();
+  const pk2 = D.getElementById('picker');
+  assert.ok(pk2.querySelector('.pk-role') && pk2.querySelector('input[type=radio]'));
+  const rowC = [...pk2.querySelectorAll('.pk-row')].find((r) => r.querySelector('input[type=text]').placeholder === 'RAG 및 LLM');
+  rowC.querySelector('.pk-role').value = '판례 검색';
+  rowC.querySelector('input[type=radio]').click();
+  [...pk2.querySelectorAll('.pk-foot button')].pop().click();
+  const sp = posted.filter((m) => m.type === 'savePicks').pop();
+  assert.strictEqual(sp.main, C);
+  assert.strictEqual(sp.roles[C], '판례 검색');
+  assert.ok([...sp.selected].includes(C), '메인으로 고르면 자동으로 체크');
   // 텍스트는 마크업으로 해석되지 않아야 함
   w.dispatchEvent(new w.MessageEvent('message', { data: { type: 'graph', graph: { nodes: [{ ...g3.nodes[0], label: '<img src=x onerror=alert(1)>' }], edges: [] }, positions: {}, options: { showSubagents: false, windowHours: 24 } } }));
   assert.strictEqual(w.document.querySelectorAll('#nodes img').length, 0);
