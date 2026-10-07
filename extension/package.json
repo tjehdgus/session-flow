@@ -1,8 +1,8 @@
 {
   "name": "session-flow",
   "displayName": "Session Flow",
-  "description": "여러 Claude Code 세션을 하네스로 묶어(멤버·역할·메인·메시지 방향) 그래프로 설계하고, 실제 흐름과 파일 전/후 변경을 확인합니다.",
-  "version": "0.5.1",
+  "description": "열린 작업 폴더의 Claude Code 세션들을 하네스(멤버·역할·메인·메시지 방향)로 설계하고, 실행 흐름과 파일 전/후 변경을 한 화면에서 확인·개입합니다.",
+  "version": "0.6.0",
   "publisher": "tjehdgus",
   "license": "MIT",
   "repository": {
@@ -41,30 +41,25 @@
       "sessionFlow": [
         {
           "id": "sessionFlow.sessions",
-          "name": "세션"
+          "name": "하네스"
         }
       ]
     },
     "commands": [
       {
-        "command": "sessionFlow.openClaude",
-        "title": "Session Flow: Claude Code에서 열기",
-        "icon": "$(comment-discussion)"
-      },
-      {
-        "command": "sessionFlow.openGraph",
-        "title": "Session Flow: 세션 그래프 열기",
+        "command": "sessionFlow.openHarness",
+        "title": "Session Flow: 하네스 열기",
         "icon": "$(type-hierarchy)"
       },
       {
-        "command": "sessionFlow.pickSessions",
-        "title": "Session Flow: 하네스 멤버 고르기",
-        "icon": "$(checklist)"
+        "command": "sessionFlow.askWrite",
+        "title": "Session Flow: 세션에게 하네스 작성 맡기기",
+        "icon": "$(sparkle)"
       },
       {
-        "command": "sessionFlow.renameSession",
-        "title": "Session Flow: 세션 이름 바꾸기",
-        "icon": "$(edit)"
+        "command": "sessionFlow.openClaude",
+        "title": "Session Flow: Claude Code에서 열기",
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "sessionFlow.openTimeline",
@@ -89,34 +84,29 @@
     "menus": {
       "view/title": [
         {
-          "command": "sessionFlow.openGraph",
+          "command": "sessionFlow.openHarness",
           "when": "view == sessionFlow.sessions",
           "group": "navigation@0"
         },
         {
-          "command": "sessionFlow.openTimeline",
+          "command": "sessionFlow.refresh",
           "when": "view == sessionFlow.sessions",
           "group": "navigation@1"
         },
         {
-          "command": "sessionFlow.refresh",
-          "when": "view == sessionFlow.sessions",
-          "group": "navigation@2"
-        },
-        {
           "command": "sessionFlow.openDataFolder",
           "when": "view == sessionFlow.sessions",
-          "group": "navigation@3"
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
-          "command": "sessionFlow.openGraph",
+          "command": "sessionFlow.openHarness",
           "when": "view == sessionFlow.sessions && viewItem == folder",
           "group": "inline"
         },
         {
-          "command": "sessionFlow.pickSessions",
+          "command": "sessionFlow.askWrite",
           "when": "view == sessionFlow.sessions && viewItem == folder",
           "group": "inline"
         },
@@ -129,20 +119,11 @@
           "command": "sessionFlow.openTimeline",
           "when": "view == sessionFlow.sessions && viewItem == session",
           "group": "inline"
-        },
-        {
-          "command": "sessionFlow.renameSession",
-          "when": "view == sessionFlow.sessions && viewItem == session",
-          "group": "1_edit"
         }
       ],
       "commandPalette": [
         {
           "command": "sessionFlow.openEvent",
-          "when": "false"
-        },
-        {
-          "command": "sessionFlow.renameSession",
           "when": "false"
         },
         {

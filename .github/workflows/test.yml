@@ -14,6 +14,7 @@ jobs:
         with:
           node-version: 20
       - run: node test/smoke.js
-      - run: node test/graph.js
+      - run: node test/store.js
       - run: node test/harness.js
       - run: node test/extension.js
+      - run: npm i --no-save jsdom@24 && node test/panel.js

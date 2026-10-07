@@ -258,7 +258,8 @@ function buildGraph(allSessions, opts = {}) {
     return hits.length === 1 ? hits[0].id : undefined;
   };
   const resolve = (h, t) => {
-    if (aliases[h] && byId.has(aliases[h])) return { id: aliases[h], how: 'manual' };
+    const al = aliases[h] || aliases[String(h).replace(/^@/, '')];
+    if (al && byId.has(al)) return { id: al, how: 'manual' };
     const o = latest((obs[normAddr(h)] || []).filter((x) => byId.has(x.sid)), t);
     if (o) return { id: o.sid, how: o.src };
     const g = guess(h);

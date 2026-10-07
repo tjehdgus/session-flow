@@ -21,7 +21,7 @@ function strings(v, out) {
 }
 
 function parse(text) {
-  const info = { title: undefined, summary: undefined, received: [] };
+  const info = { title: undefined, customTitle: undefined, summary: undefined, received: [] };
   let titleRank = 0; // custom-title(직접 지은 이름) > 그 외 *title* 레코드
   for (const line of text.split('\n')) {
     if (!line) continue;
@@ -36,6 +36,7 @@ function parse(text) {
       const key = Object.keys(o).find((k) => /title/i.test(k) && typeof o[k] === 'string' && o[k].trim());
       const rank = /custom|user|manual|rename/i.test(o.type) ? 2 : 1;
       if (key && rank >= titleRank) { info.title = o[key].trim(); titleRank = rank; }
+      if (o.type === 'custom-title' && o.customTitle) info.customTitle = String(o.customTitle).trim(); // /rename 이름 = 메시지 주소
     }
     if (isSummary && o.type === 'summary' && o.summary) info.summary = o.summary;
     // 받은 메시지는 사용자 턴으로 들어온다 (assistant 가 인용한 건 제외)

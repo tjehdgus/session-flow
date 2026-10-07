@@ -20,6 +20,8 @@ const eventsFile = path.join(baseDir, 'events.jsonl');
 const snapDir = path.join(baseDir, 'snapshots');
 const handlesFile = path.join(baseDir, 'handles.json');     // 확장이 알아낸 주소 → 세션 매핑
 const stateFile = path.join(baseDir, 'harness-state.json'); // 세션별로 마지막에 알려준 하네스 설정
+const addrFile = path.join(baseDir, 'addr.json');            // 소켓 주소 → 세션 ID (각 세션이 직접 기록)
+const titleCache = path.join(baseDir, 'titles.json');        // 세션 ID → /rename 이름 (transcript 이어 읽기)
 
 function truncate(s, n = MAX_TEXT) {
   if (s == null) return undefined;
@@ -190,6 +192,9 @@ function handle(h) {
   const selfAddr = process.env.CLAUDE_CODE_MESSAGING_SOCKET;
   if (selfAddr && !h.agent_id) {
     for (const o of out) if (['session_start', 'prompt', 'message_in', 'message', 'stop'].includes(o.kind)) o.self_addr = selfAddr;
+    const k = /^uds:/.test(selfAddr) ? selfAddr : 'uds:' + selfAddr;
+    const addrs = H.readJson(addrFile, {});
+    if (addrs[k] !== h.session_id) { addrs[k] = h.session_id; try { fs.writeFileSync(addrFile, JSON.stringify(addrs)); } catch { /* ignore */ } }
   }
 
   // ── 하네스: 역할 안내 / 차단 ──
@@ -197,24 +202,24 @@ function handle(h) {
   const wantsHarness = ev === 'SessionStart' || ev === 'UserPromptSubmit' || (ev === 'PreToolUse' && tool === 'SendMessage');
   const found = wantsHarness ? H.findConfig(h.cwd) : null;
   if (found) {
-    const handles = H.readJson(handlesFile, {});
     const sid = h.session_id;
-    if ((ev === 'SessionStart' || ev === 'UserPromptSubmit') && !h.agent_id) {
-      const ctx = H.contextFor(found, sid, handles);
-      if (ctx) {
-        const state = H.readJson(stateFile, {});
-        const hash = H.configHash(found, handles, sid);
-        // 시작할 때는 항상, 그 뒤로는 설정이 바뀌었을 때만 다시 알려준다
-        if (ev === 'SessionStart' || state[sid] !== hash) {
-          response = { hookSpecificOutput: { hookEventName: ev, additionalContext: ctx } };
-          state[sid] = hash;
-          try { fs.writeFileSync(stateFile, JSON.stringify(state)); } catch { /* ignore */ }
-          out.push({ ...base(h), kind: 'harness_brief', summary: '하네스 역할 안내', detail: ctx });
-        }
+    const myName = H.sessionName(sid, h.transcript_path, titleCache);
+    const me = H.whoAmI(found.cfg, sid, myName);
+    if ((ev === 'SessionStart' || ev === 'UserPromptSubmit') && !h.agent_id && me) {
+      const ctx = H.contextFor(found, me, myName);
+      const state = H.readJson(stateFile, {});
+      const hash = H.configHash(found, me, myName);
+      // 시작할 때는 항상, 그 뒤로는 설정이나 이름이 바뀌었을 때만 다시 알려준다
+      if (ctx && (ev === 'SessionStart' || state[sid] !== hash)) {
+        response = { hookSpecificOutput: { hookEventName: ev, additionalContext: ctx } };
+        state[sid] = hash;
+        try { fs.writeFileSync(stateFile, JSON.stringify(state)); } catch { /* ignore */ }
+        out.push({ ...base(h), kind: 'harness_brief', summary: '하네스 역할 안내', detail: ctx });
       }
     }
     if (ev === 'PreToolUse' && tool === 'SendMessage') {
-      const res = H.checkSend(found, sid, input.to || input.recipient, handles);
+      const names = Object.fromEntries(Object.entries(H.readJson(titleCache, {})).map(([k, v]) => [k, v.title]));
+      const res = H.checkSend(found, me, input.to || input.recipient, { addrs: H.readJson(addrFile, {}), names });
       if (!res.ok) {
         response = { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: res.reason } };
         const rec = out.find((o) => o.kind === 'message');

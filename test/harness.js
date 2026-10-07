@@ -1,4 +1,4 @@
-// 하네스 hook: 역할 안내와 차단 판정
+// 하네스 hook (v2: 멤버 = 세션 /rename 이름): 역할 안내, 재안내, 차단 판정, 주소 기록, 구버전 변환
 'use strict';
 const { execFileSync } = require('child_process');
 const fs = require('fs');
@@ -8,120 +8,110 @@ const assert = require('assert');
 
 const root = path.resolve(__dirname, '..');
 const recorder = path.join(root, 'plugin/scripts/record.js');
-const harness = require(path.join(root, 'extension/src/harness'));
+const H = require(path.join(root, 'plugin/scripts/harness.js'));
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'session-flow-harness-'));
 const dataDir = path.join(tmp, 'data');
 const proj = path.join(tmp, 'kftc');
 const sub = path.join(proj, 'src', 'gnn');
 fs.mkdirSync(sub, { recursive: true });
+fs.mkdirSync(path.join(proj, '.claude'), { recursive: true });
 fs.mkdirSync(dataDir, { recursive: true });
 
-const MAIN = 'aaaa-main', GNN = 'bbbb-gnn', RAG = 'cccc-rag', OUT = 'dddd-outsider';
-harness.save(proj, {
-  name: 'kftc',
-  enforce: false,
-  members: [
-    { session: MAIN, name: '메인 핸들러', role: '작업 분배와 검토', main: true },
-    { session: GNN, name: 'GNN', role: 'GNN 학습' },
-    { session: RAG, name: 'RAG 및 LLM', role: '판례 검색' },
-  ],
-  edges: [{ from: MAIN, to: GNN }, { from: GNN, to: MAIN }, { from: MAIN, to: RAG }, { from: RAG, to: MAIN }],
-  layout: {},
-});
-// 확장이 알아낸 주소 매핑
-fs.writeFileSync(path.join(dataDir, 'handles.json'), JSON.stringify({ 'kftc-3f': GNN, 'kftc-74': RAG, 'uds:/run/x.sock': MAIN }));
+const MAIN = 'aaaa-main', GNN = 'bbbb-gnn', RAG = 'cccc-rag', OUT = 'dddd-outsider', NONAME = 'eeee-noname';
+// 각 세션의 transcript 에 /rename 기록
+const tr = (sid, title) => {
+  const p = path.join(tmp, sid + '.jsonl');
+  fs.writeFileSync(p, [JSON.stringify({ type: 'user', message: { content: 'hi' } }), title ? JSON.stringify({ type: 'custom-title', customTitle: title, sessionId: sid }) : ''].filter(Boolean).join('\n') + '\n');
+  return p;
+};
+const TP = { [MAIN]: tr(MAIN, '메인 핸들러'), [GNN]: tr(GNN, 'GNN'), [RAG]: tr(RAG, 'RAG 및 LLM'), [OUT]: tr(OUT, '다른 작업'), [NONAME]: tr(NONAME, '') };
 
-const run = (sid, o, cwd = proj) => {
-  const out = execFileSync('node', [recorder], { input: JSON.stringify({ session_id: sid, cwd, ...o }), env: { ...process.env, SESSION_FLOW_DIR: dataDir } }).toString();
+const writeCfg = (c) => fs.writeFileSync(path.join(proj, '.claude', 'session-flow.json'), JSON.stringify(c));
+const base = {
+  version: 2, name: 'kftc', enforce: false,
+  members: [
+    { name: '메인 핸들러', role: '작업 분배와 검토', main: true },
+    { name: 'GNN', role: 'GNN 학습' },
+    { name: 'RAG 및 LLM', role: '판례 검색' },
+    { name: 'TTA 전문가', role: '시험 산출물', session: NONAME }, // 아직 /rename 안 한 세션
+  ],
+  edges: [],
+};
+writeCfg(base);
+
+const run = (sid, o, extraEnv = {}, cwd = proj) => {
+  const out = execFileSync('node', [recorder], {
+    input: JSON.stringify({ session_id: sid, cwd, transcript_path: TP[sid], ...o }),
+    env: { ...process.env, SESSION_FLOW_DIR: dataDir, ...extraEnv },
+  }).toString();
   return out ? JSON.parse(out) : null;
 };
+const ctxOf = (r) => r && r.hookSpecificOutput.additionalContext;
 
-// 0) 방향을 아직 안 정한 하네스: 제한 없이 안내, 차단도 안 함
-const cfg0 = harness.load(proj);
-harness.save(proj, { ...cfg0, edges: [], enforce: true });
-const r0 = run(MAIN, { hook_event_name: 'SessionStart', source: 'startup' });
-const c0 = r0.hookSpecificOutput.additionalContext;
-assert.ok(c0.includes('아직 정해지지 않았습니다'), c0);
-assert.ok(!c0.includes('직접 주고받지 말고') && !c0.includes('보내지 않습니다'), '방향 미정일 때 제한 문구 없음');
-assert.ok(c0.includes('"GNN"') && c0.includes('GNN 학습'), '멤버와 역할 안내');
-assert.strictEqual(run(GNN, { hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_use_id: 's0', tool_input: { to: 'kftc-74', message: 'x' } }), null, '방향 미정이면 차단 안 함');
-harness.save(proj, cfg0);
+// 1) 방향 미정: 제한 없이 멤버·역할 안내, 이름이 곧 주소
+const c1 = ctxOf(run(GNN, { hook_event_name: 'SessionStart', source: 'resume' }, { CLAUDE_CODE_MESSAGING_SOCKET: '/run/u/2.sock' }, sub));
+assert.ok(c1.includes('이 세션은 "GNN" 입니다') && c1.includes('역할: GNN 학습'), c1);
+assert.ok(c1.includes('메인(총괄): "메인 핸들러"'));
+assert.ok(c1.includes('아직 정해지지 않았습니다') && !c1.includes('직접 주고받지 말고'));
+assert.ok(c1.includes('수신자로 위 이름을 그대로'));
+assert.ok(!c1.includes('/rename'), '이름이 맞으면 rename 안내 없음');
 
-// 1) 세션 시작: 역할 안내 (하위 폴더에서 시작해도 상위의 설정을 찾음)
-const r1 = run(GNN, { hook_event_name: 'SessionStart', source: 'resume' }, sub);
-const ctx = r1.hookSpecificOutput.additionalContext;
-assert.strictEqual(r1.hookSpecificOutput.hookEventName, 'SessionStart');
-assert.ok(ctx.includes('"GNN"') && ctx.includes('(주소: kftc-3f)'), ctx);
-assert.ok(ctx.includes('역할: GNN 학습'));
-assert.ok(ctx.includes('메인(총괄) 세션: "메인 핸들러"'));
-assert.ok(ctx.includes('보낼 수 있는 세션: "메인 핸들러"'));
-assert.ok(ctx.includes('"RAG 및 LLM"') && ctx.includes('메인을 거치세요'));
-assert.ok(!ctx.includes('uds:'), '읽기 어려운 소켓 주소는 안내에 넣지 않음');
+// 2) 같은 설정이면 반복 안 함, 바뀌면 다음 질문에서 재안내
+assert.strictEqual(run(GNN, { hook_event_name: 'UserPromptSubmit', prompt: '진행' }), null);
+writeCfg({ ...base, edges: [{ from: '메인 핸들러', to: 'GNN' }, { from: '메인 핸들러', to: 'RAG 및 LLM' }] });
+const c2 = ctxOf(run(GNN, { hook_event_name: 'UserPromptSubmit', prompt: '계속' }));
+assert.ok(c2.includes('보내올 수 있는 세션: "메인 핸들러"'), c2);
+assert.ok(c2.includes('"RAG 및 LLM"') && c2.includes('메인을 거치세요'));
 
-// 2) 같은 설정이면 프롬프트마다 반복하지 않음
-assert.strictEqual(run(GNN, { hook_event_name: 'UserPromptSubmit', prompt: '진행해줘' }), null);
+// 3) 메인
+const cm = ctxOf(run(MAIN, { hook_event_name: 'SessionStart', source: 'startup' }, { CLAUDE_CODE_MESSAGING_SOCKET: '/run/u/1.sock' }));
+assert.ok(cm.includes('메인(총괄) 세션입니다') && cm.includes('먼저 보낼 수 있는 대상: "GNN", "RAG 및 LLM"'), cm);
 
-// 3) 설정이 바뀌면 다음 프롬프트에서 다시 안내
-const cfg = harness.load(proj);
-cfg.members.find((m) => m.session === GNN).role = 'GNN 학습과 평가';
-harness.save(proj, cfg);
-const r3 = run(GNN, { hook_event_name: 'UserPromptSubmit', prompt: '계속' });
-assert.ok(r3.hookSpecificOutput.additionalContext.includes('GNN 학습과 평가'));
-assert.strictEqual(r3.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+// 4) 이름이 없는(세션 ID 로만 등록된) 멤버에게는 /rename 안내
+const cn = ctxOf(run(NONAME, { hook_event_name: 'SessionStart', source: 'startup' }));
+assert.ok(cn.includes('이 세션은 "TTA 전문가"') && cn.includes('/rename TTA 전문가'), cn);
 
-// 4) 메인 세션 안내
-const rm = run(MAIN, { hook_event_name: 'SessionStart', source: 'startup' });
-assert.ok(rm.hookSpecificOutput.additionalContext.includes('메인(총괄) 세션입니다'));
-
-// 5) 차단 꺼짐: 아무 데나 보내도 막지 않음
-assert.strictEqual(run(GNN, { hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_use_id: 's1', tool_input: { to: 'kftc-74', message: '직접 연락' } }), null);
-
-// 6) 차단 켜짐
-cfg.enforce = true; harness.save(proj, cfg);
-const deny = run(GNN, { hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_use_id: 's2', tool_input: { to: 'kftc-74', message: 'RAG에 직접' } });
-assert.strictEqual(deny.hookSpecificOutput.permissionDecision, 'deny');
-assert.ok(deny.hookSpecificOutput.permissionDecisionReason.includes('"RAG 및 LLM"'));
-assert.ok(deny.hookSpecificOutput.permissionDecisionReason.includes('보낼 수 있는 대상: "메인 핸들러"'));
-// 이름으로 보내도 판정
-assert.strictEqual(run(GNN, { hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_use_id: 's3', tool_input: { to: '@RAG 및 LLM', message: 'x' } }).hookSpecificOutput.permissionDecision, 'deny');
-// 허용된 방향
-assert.strictEqual(run(GNN, { hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_use_id: 's4', tool_input: { to: '메인 핸들러', message: '보고' } }), null);
-// 어느 세션인지 모르는 주소는 막지 않음
-assert.strictEqual(run(GNN, { hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_use_id: 's5', tool_input: { to: 'kftc-zz', message: '?' } }), null);
-// 하네스 밖 세션은 관여하지 않음
+// 5) 하네스 밖 세션은 관여 안 함
 assert.strictEqual(run(OUT, { hook_event_name: 'SessionStart', source: 'startup' }), null);
-assert.strictEqual(run(OUT, { hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_use_id: 's6', tool_input: { to: 'kftc-3f', message: 'x' } }), null);
-// 설정 파일이 없는 폴더
-const elsewhere = path.join(tmp, 'other'); fs.mkdirSync(elsewhere);
-assert.strictEqual(run(GNN, { hook_event_name: 'SessionStart', source: 'startup' }, elsewhere), null);
 
-// 답장 허용: 메인→GNN 방향만 있어도 GNN 이 메인에게 답하는 건 허용
-const cfgR = harness.load(proj);
-harness.save(proj, { ...cfgR, edges: [{ from: MAIN, to: GNN }, { from: MAIN, to: RAG }] });
-assert.strictEqual(run(GNN, { hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_use_id: 'r1', tool_input: { to: '메인 핸들러', message: '보고' } }), null, '답장 허용');
-assert.strictEqual(run(GNN, { hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_use_id: 'r2', tool_input: { to: 'kftc-74', message: 'x' } }).hookSpecificOutput.permissionDecision, 'deny', 'GNN→RAG 는 여전히 차단');
-const cGnn = run(GNN, { hook_event_name: 'SessionStart', source: 'resume' }).hookSpecificOutput.additionalContext;
-assert.ok(cGnn.includes('받은 메시지에는 답할 수 있습니다'), cGnn);
-harness.save(proj, cfgR);
+// 6) 차단
+const send = (sid, to) => run(sid, { hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_use_id: 'x' + Math.random(), tool_input: { to, message: 'm' } });
+assert.strictEqual(send(GNN, 'RAG 및 LLM'), null, '차단 꺼짐');
+writeCfg({ ...base, enforce: true, edges: [{ from: '메인 핸들러', to: 'GNN' }, { from: '메인 핸들러', to: 'RAG 및 LLM' }] });
+const d1 = send(GNN, 'RAG 및 LLM');
+assert.strictEqual(d1.hookSpecificOutput.permissionDecision, 'deny');
+assert.ok(d1.hookSpecificOutput.permissionDecisionReason.includes('"RAG 및 LLM"'));
+assert.strictEqual(send(GNN, '@메인 핸들러'), null, '정한 방향에 대한 답장 허용');
+assert.strictEqual(send(MAIN, 'GNN'), null, '정한 방향');
+assert.strictEqual(send(GNN, 'kftc-zz'), null, '모르는 주소는 통과');
+// 소켓 주소로 보내도 판정: /run/u/1.sock 는 메인(위에서 기록됨)
+assert.strictEqual(send(GNN, 'uds:/run/u/1.sock'), null, '소켓 주소 = 메인 → 답장 허용');
+run(OUT, { hook_event_name: 'UserPromptSubmit', prompt: 'x' }, { CLAUDE_CODE_MESSAGING_SOCKET: '/run/u/9.sock' });
+assert.strictEqual(send(GNN, 'uds:/run/u/9.sock').hookSpecificOutput.permissionDecision, 'deny', '하네스 밖 세션');
+// 방향을 비우면 차단 안 함
+writeCfg({ ...base, enforce: true, edges: [] });
+assert.strictEqual(send(GNN, 'RAG 및 LLM'), null);
 
-// 자기 소켓 주소 기록
-execFileSync('node', [recorder], { input: JSON.stringify({ session_id: RAG, cwd: proj, hook_event_name: 'UserPromptSubmit', prompt: '주소 테스트' }), env: { ...process.env, SESSION_FLOW_DIR: dataDir, CLAUDE_CODE_MESSAGING_SOCKET: '/run/user/1002/cc-socks/777.sock' } });
-
-// 기록: 막힌 메시지는 blocked 로 남음, 안내는 harness_brief
+// 7) 기록: 주소 표, 이름 캐시, 막힌 메시지, 안내 이벤트
+const addrs = JSON.parse(fs.readFileSync(path.join(dataDir, 'addr.json'), 'utf8'));
+assert.strictEqual(addrs['uds:/run/u/1.sock'], MAIN);
+assert.strictEqual(addrs['uds:/run/u/9.sock'], OUT);
+const titles = JSON.parse(fs.readFileSync(path.join(dataDir, 'titles.json'), 'utf8'));
+assert.strictEqual(titles[GNN].title, 'GNN');
 const events = fs.readFileSync(path.join(dataDir, 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-const blocked = events.filter((e) => e.kind === 'message' && e.blocked);
-assert.strictEqual(blocked.length, 3);
-assert.ok(events.some((e) => e.session_id === RAG && e.self_addr === '/run/user/1002/cc-socks/777.sock'), '자기 주소 기록');
+assert.strictEqual(events.filter((e) => e.kind === 'message' && e.blocked).length, 2);
 assert.ok(events.some((e) => e.kind === 'harness_brief' && e.session_id === GNN));
 
-// 설정 저장: 멤버 아닌 방향은 정리, 메인은 하나만
-const saved = harness.save(proj, { ...cfg, members: [...cfg.members.map((m) => ({ ...m, main: true }))], edges: [...cfg.edges, { from: MAIN, to: OUT }, { from: GNN, to: GNN }] });
-assert.strictEqual(saved.members.filter((m) => m.main).length, 1);
-assert.ok(!saved.edges.some((e) => e.to === OUT || e.from === e.to));
-assert.strictEqual(harness.allowed(saved, GNN, MAIN), true);
-assert.strictEqual(harness.allowed(saved, GNN, RAG), false);
-assert.strictEqual(harness.allowed(saved, GNN, OUT), null);
+// 8) 이름 캐시는 이어 읽기: /rename 이 나중에 바뀌어도 반영
+fs.appendFileSync(TP[GNN], JSON.stringify({ type: 'custom-title', customTitle: 'GNN 학습', sessionId: GNN }) + '\n');
+assert.strictEqual(H.sessionName(GNN, TP[GNN], path.join(dataDir, 'titles.json')), 'GNN 학습');
+
+// 9) 구버전(세션 ID 기반) 설정 변환
+const v1 = H.normalize({ name: 'k', members: [{ session: MAIN, name: '메인 핸들러', main: true }, { session: GNN, name: 'GNN' }], edges: [{ from: MAIN, to: GNN }], layout: { [GNN]: { x: 1, y: 2 } } });
+assert.deepStrictEqual(v1.edges, [{ from: '메인 핸들러', to: 'GNN' }]);
+assert.deepStrictEqual(v1.layout, { GNN: { x: 1, y: 2 } });
+assert.strictEqual(v1.version, 2);
 
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log('OK — harness briefing, re-brief on change, enforce/deny, unknown & outsider passthrough');
+console.log('OK — v2 harness hook: name identity, briefing, rename hint, enforce/reply/outside/unknown, addr & title caches, v1 migration');
