@@ -1,0 +1,195 @@
+#!/usr/bin/env node
+// Session Flow hook recorder.
+// Claude Code hook 입력(stdin JSON)을 받아 ~/.session-flow/events.jsonl 에 한 줄씩 기록한다.
+// 파일 수정 툴은 PreToolUse 시점에 "전" 스냅샷, PostToolUse 시점에 "후" 스냅샷을 저장한다.
+// 어떤 경우에도 Claude Code 동작을 막지 않도록 항상 exit 0, stdout 출력 없음.
+'use strict';
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+const AGENT_TOOLS = new Set(['Agent', 'Task']);
+const MAX_TEXT = 4000;
+const MAX_SNAPSHOT_BYTES = 1024 * 1024;
+
+const baseDir = process.env.SESSION_FLOW_DIR || path.join(os.homedir(), '.session-flow');
+const eventsFile = path.join(baseDir, 'events.jsonl');
+const snapDir = path.join(baseDir, 'snapshots');
+
+function truncate(s, n = MAX_TEXT) {
+  if (s == null) return undefined;
+  s = String(s);
+  return s.length > n ? s.slice(0, n) + `\n… (${s.length - n} chars truncated)` : s;
+}
+
+function safeId(id) {
+  return String(id || '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120);
+}
+
+function responseText(r) {
+  if (r == null) return undefined;
+  if (typeof r === 'string') return r;
+  if (Array.isArray(r)) return r.map(responseText).filter(Boolean).join('\n');
+  if (typeof r === 'object') {
+    if (typeof r.text === 'string') return r.text;
+    if (Array.isArray(r.content)) return responseText(r.content);
+    if ('stdout' in r || 'stderr' in r) {
+      return [r.stdout, r.stderr].filter((x) => x).join('\n');
+    }
+  }
+  try { return JSON.stringify(r); } catch { return undefined; }
+}
+
+function targetFile(input) {
+  if (!input) return undefined;
+  return input.file_path || input.notebook_path || input.path || undefined;
+}
+
+function summarize(tool, input) {
+  if (!input) return '';
+  switch (tool) {
+    case 'Bash': return input.command || '';
+    case 'Read': case 'Edit': case 'Write': case 'MultiEdit': return targetFile(input) || '';
+    case 'NotebookEdit': return input.notebook_path || '';
+    case 'Grep': return `${input.pattern || ''}${input.path ? ' in ' + input.path : ''}`;
+    case 'Glob': return input.pattern || '';
+    case 'WebFetch': return input.url || '';
+    case 'WebSearch': return input.query || '';
+    case 'Agent': case 'Task': return `${input.subagent_type || 'agent'}: ${input.description || ''}`;
+    case 'SendMessage': return `→ ${input.to || input.recipient || '?'}`;
+    default: {
+      const f = targetFile(input);
+      if (f) return f;
+      try { return JSON.stringify(input).slice(0, 160); } catch { return ''; }
+    }
+  }
+}
+
+function snapshot(file, toolUseId, phase) {
+  if (!file || !toolUseId) return false;
+  const dest = path.join(snapDir, `${safeId(toolUseId)}.${phase}`);
+  try {
+    const st = fs.statSync(file);
+    if (!st.isFile() || st.size > MAX_SNAPSHOT_BYTES) return false;
+    fs.copyFileSync(file, dest);
+    return true;
+  } catch {
+    // 파일이 아직 없음(새 파일) → 빈 스냅샷
+    if (phase === 'before') {
+      try { fs.writeFileSync(dest, ''); return true; } catch { return false; }
+    }
+    return false;
+  }
+}
+
+function base(h) {
+  return {
+    v: 1,
+    ts: new Date().toISOString(),
+    session_id: h.session_id,
+    cwd: h.cwd,
+    agent_id: h.agent_id || undefined,
+    agent_type: h.agent_type || undefined,
+  };
+}
+
+function handle(h) {
+  const ev = h.hook_event_name;
+  const tool = h.tool_name;
+  const input = h.tool_input || {};
+  const out = [];
+
+  switch (ev) {
+    case 'SessionStart':
+      out.push({ ...base(h), kind: 'session_start', summary: h.source || '' });
+      break;
+    case 'SessionEnd':
+      out.push({ ...base(h), kind: 'session_end', summary: h.reason || '' });
+      break;
+    case 'UserPromptSubmit':
+      out.push({ ...base(h), kind: 'prompt', summary: truncate(h.prompt, 120), detail: truncate(h.prompt) });
+      break;
+    case 'Stop':
+      out.push({ ...base(h), kind: 'stop' });
+      break;
+    case 'SubagentStart':
+      out.push({ ...base(h), kind: 'subagent_start', summary: h.agent_type || '' });
+      break;
+    case 'SubagentStop':
+      out.push({
+        ...base(h), kind: 'subagent_stop', summary: h.agent_type || '',
+        detail: truncate(h.last_assistant_message),
+      });
+      break;
+    case 'PreToolUse':
+      if (EDIT_TOOLS.has(tool)) {
+        snapshot(targetFile(input), h.tool_use_id, 'before');
+      } else if (AGENT_TOOLS.has(tool)) {
+        out.push({
+          ...base(h), kind: 'delegate', tool, tool_use_id: h.tool_use_id,
+          target: input.subagent_type || 'agent',
+          summary: input.description || summarize(tool, input),
+          detail: truncate(input.prompt),
+        });
+      } else if (tool === 'SendMessage') {
+        out.push({
+          ...base(h), kind: 'message', tool, tool_use_id: h.tool_use_id,
+          target: input.to || input.recipient,
+          summary: truncate(input.summary || input.message || input.content, 120),
+          detail: truncate(input.message || input.content || JSON.stringify(input)),
+        });
+      }
+      break;
+    case 'PostToolUse':
+    case 'PostToolUseFailure': {
+      const file = targetFile(input);
+      const isEdit = EDIT_TOOLS.has(tool);
+      const rec = {
+        ...base(h),
+        kind: ev === 'PostToolUse' ? 'tool' : 'tool_error',
+        tool,
+        tool_use_id: h.tool_use_id,
+        file: file || undefined,
+        summary: truncate(summarize(tool, input), 200),
+      };
+      if (isEdit) {
+        rec.has_after = snapshot(file, h.tool_use_id, 'after');
+        rec.has_before = fs.existsSync(path.join(snapDir, `${safeId(h.tool_use_id)}.before`));
+        if (tool === 'Edit') rec.detail = truncate(`- ${input.old_string ?? ''}\n+ ${input.new_string ?? ''}`);
+      } else if (tool !== 'Read') {
+        rec.detail = truncate(responseText(h.tool_response ?? h.error));
+      }
+      if (ev === 'PostToolUseFailure') rec.detail = truncate(responseText(h.error ?? h.tool_response));
+      out.push(rec);
+      break;
+    }
+    default:
+      break;
+  }
+
+  if (!out.length) return;
+  fs.appendFileSync(eventsFile, out.map((o) => JSON.stringify(o)).join('\n') + '\n');
+}
+
+function main() {
+  let raw = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (c) => { raw += c; });
+  process.stdin.on('end', () => {
+    try {
+      fs.mkdirSync(snapDir, { recursive: true });
+      handle(JSON.parse(raw));
+    } catch (e) {
+      try {
+        fs.mkdirSync(baseDir, { recursive: true });
+        fs.appendFileSync(path.join(baseDir, 'errors.log'), `${new Date().toISOString()} ${e && e.stack || e}\n`);
+      } catch { /* ignore */ }
+    }
+    process.exit(0);
+  });
+}
+
+if (require.main === module) main();
+module.exports = { handle, summarize, responseText };

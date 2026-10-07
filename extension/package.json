@@ -1,0 +1,60 @@
+{
+  "name": "session-flow",
+  "displayName": "Session Flow",
+  "description": "Claude Code 세션과 서브에이전트의 흐름을 타임라인으로 보고, 수정된 파일을 전/후 diff로 확인합니다.",
+  "version": "0.1.0",
+  "publisher": "tjehdgus",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tjehdgus/session-flow"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Visualization", "Other"],
+  "keywords": ["claude", "claude code", "agents", "diff", "timeline"],
+  "main": "./src/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "sessionFlow", "title": "Session Flow", "icon": "media/icon.svg" }
+      ]
+    },
+    "views": {
+      "sessionFlow": [
+        { "id": "sessionFlow.sessions", "name": "세션" }
+      ]
+    },
+    "commands": [
+      { "command": "sessionFlow.openTimeline", "title": "Session Flow: 타임라인 열기", "icon": "$(graph-line)" },
+      { "command": "sessionFlow.refresh", "title": "Session Flow: 새로고침", "icon": "$(refresh)" },
+      { "command": "sessionFlow.openDataFolder", "title": "Session Flow: 기록 폴더 열기", "icon": "$(folder-opened)" },
+      { "command": "sessionFlow.openEvent", "title": "Session Flow: 이벤트 열기" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "sessionFlow.openTimeline", "when": "view == sessionFlow.sessions", "group": "navigation@1" },
+        { "command": "sessionFlow.refresh", "when": "view == sessionFlow.sessions", "group": "navigation@2" },
+        { "command": "sessionFlow.openDataFolder", "when": "view == sessionFlow.sessions", "group": "navigation@3" }
+      ],
+      "view/item/context": [
+        { "command": "sessionFlow.openTimeline", "when": "view == sessionFlow.sessions && viewItem == session", "group": "inline" }
+      ],
+      "commandPalette": [
+        { "command": "sessionFlow.openEvent", "when": "false" }
+      ]
+    },
+    "configuration": {
+      "title": "Session Flow",
+      "properties": {
+        "sessionFlow.dataDir": {
+          "type": "string",
+          "default": "",
+          "description": "기록 폴더 경로. 비워두면 ~/.session-flow (또는 SESSION_FLOW_DIR 환경변수)를 사용합니다."
+        }
+      }
+    }
+  }
+}

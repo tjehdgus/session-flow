@@ -1,0 +1,14 @@
+{
+  "name": "session-flow",
+  "description": "Claude Code 세션 흐름 기록 도구",
+  "owner": {
+    "name": "tjehdgus"
+  },
+  "plugins": [
+    {
+      "name": "session-flow",
+      "source": "./plugin",
+      "description": "세션/서브에이전트의 툴 호출과 파일 변경(전/후)을 ~/.session-flow 에 기록합니다"
+    }
+  ]
+}
