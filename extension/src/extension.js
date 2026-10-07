@@ -7,6 +7,7 @@ const { readEvents, buildSessions, sessionView, buildGraph, groupByFolder } = re
 const { timelineHtml } = require('./timeline');
 const { graphHtml } = require('./graph');
 const { scanTranscript, norm } = require('./transcripts');
+const { diffLines } = require('./diff');
 
 const SNAP_SCHEME = 'session-flow-snap';
 const DETAIL_SCHEME = 'session-flow-detail';
@@ -163,6 +164,34 @@ function activate(context) {
     },
   };
 
+  const MAX_DIFF_LINES = 4000;
+  const readSnap = (e, phase) => { try { return fs.readFileSync(snapFile(e.tool_use_id, phase), 'utf8'); } catch { return ''; } };
+  // first ~ last 이벤트 사이의 파일 변경 (같은 이벤트면 그 수정 하나)
+  function computeDiff(firstIdx, lastIdx) {
+    const a = model.byIdx.get(Number(firstIdx)), b = model.byIdx.get(Number(lastIdx ?? firstIdx));
+    if (!a || !b || !a.tool_use_id || !b.tool_use_id) return null;
+    const d = diffLines(readSnap(a, 'before'), readSnap(b, 'after'));
+    let budget = MAX_DIFF_LINES, truncated = false;
+    const hunks = [];
+    for (const h of d.hunks) {
+      if (budget <= 0) { truncated = true; break; }
+      const lines = h.lines.slice(0, budget);
+      if (lines.length < h.lines.length) truncated = true;
+      budget -= lines.length;
+      hunks.push({ ...h, lines });
+    }
+    return { file: a.file, add: d.add, del: d.del, isNew: d.isNew, deleted: d.deleted, hunks, truncated, edits: undefined, from: a.ts, to: b.ts, agent: b.agent_type };
+  }
+  async function openRangeDiff(firstIdx, lastIdx) {
+    const a = model.byIdx.get(Number(firstIdx)), b = model.byIdx.get(Number(lastIdx ?? firstIdx));
+    if (!a || !b || !a.tool_use_id || !b.tool_use_id) return;
+    const name = a.file ? path.basename(a.file) : 'file';
+    const left = vscode.Uri.from({ scheme: SNAP_SCHEME, path: `/before/${encodeURIComponent(a.tool_use_id)}/${name}` });
+    const right = vscode.Uri.from({ scheme: SNAP_SCHEME, path: `/after/${encodeURIComponent(b.tool_use_id)}/${name}` });
+    const label = a === b ? hhmmss(b.ts) : `${hhmmss(a.ts)} → ${hhmmss(b.ts)}`;
+    await vscode.commands.executeCommand('vscode.diff', left, right, `${name} (${label})`, { preview: true });
+  }
+
   async function openEvent(idx) {
     const e = model.byIdx.get(Number(idx));
     if (!e) return;
@@ -266,6 +295,9 @@ function activate(context) {
     graphPanel.webview.onDidReceiveMessage((m) => {
       if (m.type === 'ready') postGraph();
       if (m.type === 'open') openEvent(m.idx);
+      if (m.type === 'diff') graphPanel && graphPanel.webview.postMessage({ type: 'diffResult', key: m.key, diff: computeDiff(m.first, m.last) });
+      if (m.type === 'openDiff') openRangeDiff(m.first, m.last);
+      if (m.type === 'openFile' && m.file) vscode.window.showTextDocument(vscode.Uri.file(m.file), { preview: true });
       if (m.type === 'openTimeline') { const s = model.find(m.id); if (s) openTimeline({ s }); }
       if (m.type === 'positions') context.globalState.update(POS_KEY, m.positions);
       if (m.type === 'options' && m.options.folder) { graphFolder = m.options.folder; delete m.options.folder; }

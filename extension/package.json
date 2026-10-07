@@ -2,7 +2,7 @@
   "name": "session-flow",
   "displayName": "Session Flow",
   "description": "Claude Code 세션들이 작업 폴더 안에서 어떻게 주고받는지 그래프로 보고, 수정된 파일을 전/후 diff로 확인합니다.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "tjehdgus",
   "license": "MIT",
   "repository": {

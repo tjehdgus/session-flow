@@ -145,6 +145,20 @@ function sessionView(s) {
   };
 }
 
+// 세션에서 수정된 파일별로: 처음 수정 직전 ~ 마지막 수정 직후 (커밋 하나처럼 보기 위함)
+function changedFiles(s) {
+  const m = new Map();
+  for (const e of s.events) {
+    if (e.kind !== 'tool' || !e.file || !(e.has_after || e.has_before) || !e.tool_use_id) continue;
+    let f = m.get(e.file);
+    if (!f) { f = { file: e.file, edits: 0, first: e._idx, last: e._idx, ts: e.ts }; m.set(e.file, f); }
+    f.edits += 1;
+    f.last = e._idx;
+    f.ts = e.ts;
+  }
+  return [...m.values()].sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
+}
+
 // ───────────────────────── 세션 그래프 ─────────────────────────
 // nodes: 세션(및 선택 시 서브에이전트), edges: 보낸 쪽 → 받는 쪽 (방향별로 따로)
 //
@@ -263,6 +277,7 @@ function buildGraph(allSessions, opts = {}) {
       editCount: s.editCount,
       fileCount: s.files.size,
       last: s.end,
+      changedFiles: changedFiles(s),
       recent: s.events
         .filter((e) => !['stop', 'session_start', 'session_end'].includes(e.kind))
         .slice(-15).reverse()
@@ -307,4 +322,4 @@ function buildGraph(allSessions, opts = {}) {
   return { nodes, edges, learned };
 }
 
-module.exports = { readEvents, buildSessions, sessionView, buildGraph, groupByFolder, parseIncoming, folderOf };
+module.exports = { readEvents, buildSessions, sessionView, buildGraph, groupByFolder, parseIncoming, folderOf, changedFiles };

@@ -73,6 +73,28 @@ function graphHtml() {
   .ev:hover, .ev:focus-visible { background: rgba(127,127,127,.14); }
   .ev .k { font-family: var(--vscode-editor-font-family); font-size:10.5px; min-width:58px; opacity:.75; }
   .ev .v { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  aside.wide { width:min(620px, 55%); }
+  .files { display:flex; flex-direction:column; gap:2px; }
+  .fl { all:unset; display:flex; gap:8px; align-items:baseline; padding:6px 8px; border-radius:6px; font-size:12px; cursor:pointer; }
+  .fl:hover, .fl:focus-visible { background: rgba(127,127,127,.14); }
+  .fl .nm { font-family: var(--vscode-editor-font-family); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+  .fl .ct { font-size:11px; opacity:.65; white-space:nowrap; }
+  .dhead { display:flex; flex-direction:column; gap:6px; }
+  .back { all:unset; cursor:pointer; font-size:12px; opacity:.8; align-self:flex-start; padding:2px 0; }
+  .back:hover, .back:focus-visible { opacity:1; text-decoration:underline; }
+  .dstat { font-family: var(--vscode-editor-font-family); font-size:12px; display:flex; gap:10px; align-items:center; }
+  .plus { color:#4CC38A; } .minus { color:#F2797B; }
+  .bar5 { display:inline-flex; gap:2px; } .bar5 i { width:8px; height:8px; border-radius:1px; background: rgba(127,127,127,.35); display:inline-block; }
+  .bar5 i.a { background:#4CC38A; } .bar5 i.d { background:#F2797B; }
+  .diffbox { border:1px solid var(--vscode-panel-border, rgba(127,127,127,.25)); border-radius:8px; overflow:auto; max-height:calc(100vh - 260px); font-family: var(--vscode-editor-font-family); font-size:12px; line-height:20px; }
+  .hk { padding:2px 10px; background: rgba(91,157,255,.12); color: var(--vscode-foreground); opacity:.85; white-space:pre; }
+  .dl { display:grid; grid-template-columns: 44px 44px 18px max-content; min-width:100%; white-space:pre; }
+  .dl span { padding:0 6px; }
+  .dl .no { text-align:right; opacity:.5; user-select:none; font-variant-numeric: tabular-nums; }
+  .dl .sg { user-select:none; text-align:center; padding:0; }
+  .dl.add { background: rgba(46,160,67,.18); } .dl.add .sg { color:#4CC38A; }
+  .dl.del { background: rgba(248,81,73,.16); } .dl.del .sg { color:#F2797B; }
+  .note { font-size:12px; opacity:.7; padding:8px 0; }
   .empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center; line-height:1.9; opacity:.7; pointer-events:none; padding:24px; }
   .hint { position:absolute; left:12px; bottom:10px; font-size:11px; opacity:.55; pointer-events:none; }
   @media (max-width: 720px) { .main { flex-direction:column; } aside { width:auto; max-height:45%; border-left:0; border-top:1px solid var(--vscode-panel-border, rgba(127,127,127,.25)); } }
@@ -116,7 +138,8 @@ function graphHtml() {
   const SVGNS = 'http://www.w3.org/2000/svg';
   let graph = { nodes: [], edges: [] };
   let pos = {};
-  let sel = null;            // { type:'node'|'edge', id }
+  let sel = null;            // { type:'node'|'edge'|'diff', id }
+  let diffState = null;      // { key, first, last, file, edits, back, data }
   let view = { x: 0, y: 0, k: 1 };
   let firstFit = true;
 
@@ -243,6 +266,8 @@ function graphHtml() {
   function renderSide() {
     const side = $('side');
     side.replaceChildren();
+    side.classList.toggle('wide', !!(sel && sel.type === 'diff'));
+    if (sel && sel.type === 'diff') return renderDiff(side);
     if (!sel) {
       side.append(el('h2', null, $('title').textContent || '세션 사이의 흐름'));
       side.append(el('div', 'muted', '노드를 누르면 세션 상세, 화살표를 누르면 두 세션이 주고받은 메시지가 여기에 나옵니다. 숫자는 메시지 수, 흐르는 점선은 방금(90초 이내) 오간 메시지입니다.'));
@@ -316,6 +341,18 @@ function graphHtml() {
         side.append(r);
       });
     }
+    if (n.changedFiles && n.changedFiles.length) {
+      side.append(el('div', 'muted', '변경된 파일 ' + n.changedFiles.length + '개 · 누르면 이 세션에서 바뀐 전/후 비교'));
+      const box = el('div', 'files');
+      n.changedFiles.forEach((f) => {
+        const r = el('button', 'fl'); r.type = 'button';
+        r.title = f.file;
+        r.append(el('span', 'nm', f.file.split(/[\\/]/).pop()), el('span', 'ct', '수정 ' + f.edits + '회 · ' + fmt(f.ts)));
+        r.addEventListener('click', () => showDiff({ first: f.first, last: f.last, file: f.file, edits: f.edits }));
+        box.append(r);
+      });
+      side.append(box);
+    }
     if (n.recent && n.recent.length) {
       side.append(el('div', 'muted', '최근 이벤트'));
       n.recent.forEach((e) => {
@@ -324,10 +361,64 @@ function graphHtml() {
         const v = e.file ? e.file.split(/[\\\\/]/).pop() : (e.target ? e.target + ': ' : '') + (e.summary || '');
         r.append(el('span', 'k', fmt(e.ts) + ' ' + k), el('span', 'v', (e.hasDiff ? '± ' : '') + v));
         r.title = e.summary || '';
-        r.addEventListener('click', () => vscode.postMessage({ type: 'open', idx: e.idx }));
+        r.addEventListener('click', () => (e.hasDiff ? showDiff({ first: e.idx, last: e.idx, file: e.file, edits: 1 }) : vscode.postMessage({ type: 'open', idx: e.idx })));
         side.append(r);
       });
     }
+  }
+
+  // ── 전/후 비교 (git 스타일) ──
+  function showDiff(o) {
+    const key = o.first + '-' + o.last;
+    diffState = { ...o, key, back: sel, data: undefined };
+    sel = { type: 'diff', id: key };
+    vscode.postMessage({ type: 'diff', key, first: o.first, last: o.last });
+    render();
+  }
+
+  function renderDiff(side) {
+    const d = diffState;
+    const head = el('div', 'dhead');
+    const back = el('button', 'back', '← 돌아가기'); back.type = 'button';
+    back.addEventListener('click', () => { sel = d.back || null; diffState = null; render(); });
+    head.append(back);
+    head.append(el('h2', null, (d.file || '').split(/[\\/]/).pop()));
+    head.append(el('div', 'muted', d.file || ''));
+    const data = d.data;
+    if (data) {
+      const st = el('div', 'dstat');
+      const total = data.add + data.del;
+      const bars = el('span', 'bar5');
+      const na = total ? Math.round((data.add / total) * 5) : 0;
+      for (let i = 0; i < 5; i++) { const b = document.createElement('i'); b.className = i < na ? 'a' : (i < (total ? 5 : 0) ? 'd' : ''); bars.append(b); }
+      st.append(el('span', 'plus', '+' + data.add), el('span', 'minus', '−' + data.del), bars);
+      const when = data.from === data.to ? fmt(data.to) : fmt(data.from) + ' → ' + fmt(data.to);
+      st.append(el('span', 'muted', (d.edits > 1 ? '수정 ' + d.edits + '회 누적 · ' : '') + when + (data.isNew ? ' · 새 파일' : '')));
+      head.append(st);
+    }
+    const row = el('div', 'row');
+    const ed = el('button', 'primary', '에디터에서 나란히 보기'); ed.type = 'button';
+    ed.addEventListener('click', () => vscode.postMessage({ type: 'openDiff', first: d.first, last: d.last }));
+    const of = el('button', '', '파일 열기'); of.type = 'button';
+    of.addEventListener('click', () => vscode.postMessage({ type: 'openFile', file: d.file }));
+    row.append(ed, of);
+    head.append(row);
+    side.append(head);
+
+    if (data === undefined) { side.append(el('div', 'note', '불러오는 중…')); return; }
+    if (data === null) { side.append(el('div', 'note', '이 수정의 스냅샷이 없어 비교할 수 없습니다. (1MB가 넘는 파일은 스냅샷을 남기지 않습니다)')); return; }
+    if (!data.hunks.length) { side.append(el('div', 'note', '내용 변경이 없습니다.')); return; }
+    const box = el('div', 'diffbox');
+    data.hunks.forEach((h) => {
+      box.append(el('div', 'hk', '@@ -' + h.oldStart + ',' + h.oldLines + ' +' + h.newStart + ',' + h.newLines + ' @@'));
+      h.lines.forEach((l) => {
+        const r = el('div', 'dl' + (l.t === '+' ? ' add' : l.t === '-' ? ' del' : ''));
+        r.append(el('span', 'no', l.o != null ? String(l.o) : ''), el('span', 'no', l.n != null ? String(l.n) : ''), el('span', 'sg', l.t === ' ' ? '' : (l.t === '-' ? '−' : '+')), el('span', 'tx', l.text));
+        box.append(r);
+      });
+    });
+    side.append(box);
+    if (data.truncated) side.append(el('div', 'note', '변경이 많아 일부만 표시했습니다. 전체는 "에디터에서 나란히 보기"로 확인하세요.'));
   }
 
   function select(s) { sel = s; render(); }
@@ -417,11 +508,13 @@ function graphHtml() {
       $('title').textContent = cur ? cur.name + ' 플로우' : '세션 그래프';
       $('title').title = cur ? cur.folder : '';
       $('win').value = String(m.options.windowHours);
-      if (sel && !(sel.type === 'node' ? graph.nodes.some((n) => n.id === sel.id) : graph.edges.some((e) => e.id === sel.id))) sel = null;
+      if (sel && sel.type !== 'diff' && !(sel.type === 'node' ? graph.nodes.some((n) => n.id === sel.id) : graph.edges.some((e) => e.id === sel.id))) sel = null;
       const before = Object.keys(pos).length;
       layout(false);
       render();
       if (firstFit || Object.keys(pos).length !== before) { fit(); firstFit = false; }
+    } else if (m.type === 'diffResult') {
+      if (diffState && diffState.key === m.key) { diffState.data = m.diff; renderSide(); }
     } else if (m.type === 'focus') {
       select({ type: 'node', id: m.id });
     }

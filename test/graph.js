@@ -56,6 +56,16 @@ send(A, '/nope/A.jsonl', { hook_event_name: 'SubagentStart', agent_id: 'ag1', ag
 send(A, '/nope/A.jsonl', { hook_event_name: 'PostToolUse', agent_id: 'ag1', agent_type: 'Explore', tool_name: 'Grep', tool_use_id: 't7', tool_input: { pattern: 'label_rule' } });
 send(A, '/nope/A.jsonl', { hook_event_name: 'SubagentStop', agent_id: 'ag1', agent_type: 'Explore', last_assistant_message: 'account_pipeline.py 에 있습니다' });
 
+// A 가 파일을 두 번 수정
+const tf = path.join(cwd, 'pipeline.py');
+fs.writeFileSync(tf, 'def label(x):\n    return x.role\n\ndef train():\n    pass\n');
+send(A, '/nope/A.jsonl', { hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_use_id: 'e1', tool_input: { file_path: tf, old_string: 'x.role', new_string: 'x.check' } });
+fs.writeFileSync(tf, 'def label(x):\n    return x.check\n\ndef train():\n    pass\n');
+send(A, '/nope/A.jsonl', { hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_use_id: 'e1', tool_input: { file_path: tf, old_string: 'x.role', new_string: 'x.check' } });
+send(A, '/nope/A.jsonl', { hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_use_id: 'e2', tool_input: { file_path: tf } });
+fs.writeFileSync(tf, 'def label(x):\n    return x.check\n\ndef train(rule=None):\n    pass\n');
+send(A, '/nope/A.jsonl', { hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_use_id: 'e2', tool_input: { file_path: tf } });
+
 // 빈 세션(재개만 하고 아무것도 안 함) — 그래프에서 숨김
 send('ee55-empty', '/nope/E.jsonl', { hook_event_name: 'SessionStart', source: 'resume' });
 send('ee55-empty', '/nope/E.jsonl', { hook_event_name: 'Stop' });
@@ -101,6 +111,17 @@ assert.strictEqual(g.nodes.find((n) => n.id === '@tta-zz').kind, 'ghost');
 assert.ok(!g.edges.some((e) => e.from === B && e.to === B), '받은 메시지가 중복 엣지가 되지 않음');
 assert.ok(edge(A, B).active);
 
+// 변경된 파일: 세션 전체 누적 diff
+const nA = g.nodes.find((n) => n.id === A);
+assert.strictEqual(nA.changedFiles.length, 1);
+assert.strictEqual(nA.changedFiles[0].edits, 2);
+const { diffLines } = require(path.join(root, 'extension/src/diff'));
+const snap = (id, ph) => fs.readFileSync(path.join(dataDir, 'snapshots', id + '.' + ph), 'utf8');
+const cum = diffLines(snap('e1', 'before'), snap('e2', 'after'));
+assert.strictEqual(cum.add, 2); assert.strictEqual(cum.del, 2);
+const one = diffLines(snap('e2', 'before'), snap('e2', 'after'));
+assert.strictEqual(one.add, 1); assert.strictEqual(one.del, 1);
+
 // 수동 연결이 학습보다 우선
 const g2 = buildGraph(sessions, { folder: cwd, transcripts, norm, aliases: { 'tta-zz': C } });
 assert.strictEqual(g2.edges.find((e) => e.from === A && e.to === C).count, 2);
@@ -137,12 +158,31 @@ if (JSDOM) {
   assert.strictEqual(w.document.querySelectorAll('line.edge-line.active').length >= 1, true);
   // 노드 클릭 → 상세 패널
   const target = [...nodeEls].find((e) => e.textContent.includes('GNN'));
-  target.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
-  target.dispatchEvent(new w.Event('pointerup', { bubbles: true }));
-  assert.ok(w.document.getElementById('side').textContent.includes('GNN'));
+  target.dispatchEvent(new w.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+  target.dispatchEvent(new w.MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+  assert.strictEqual(w.document.querySelector('#side h2').textContent, 'GNN', '노드 클릭 → 그 세션 상세');
   // 화살표 클릭 → 메시지 내역
   w.document.querySelector('line.edge-hit').dispatchEvent(new w.Event('click', { bubbles: true }));
   assert.ok(w.document.querySelectorAll('#side .msg').length >= 1);
+  // 노드 → 변경된 파일 → diff
+  const aEl = [...w.document.querySelectorAll('.node')].find((e) => e.textContent.includes('메인 핸들러') || e.dataset.id === A);
+  aEl.dispatchEvent(new w.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+  aEl.dispatchEvent(new w.MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+  const fileBtn = w.document.querySelector('#side .fl');
+  assert.ok(fileBtn, '변경된 파일 목록');
+  fileBtn.dispatchEvent(new w.Event('click', { bubbles: true }));
+  const req = posted.filter((m) => m.type === 'diff').pop();
+  assert.ok(req && req.first !== req.last, '누적 diff 요청');
+  assert.ok(w.document.getElementById('side').textContent.includes('불러오는 중'));
+  w.dispatchEvent(new w.MessageEvent('message', { data: { type: 'diffResult', key: req.key, diff: { file: tf, ...cum, from: 'x', to: 'y' } } }));
+  assert.strictEqual(w.document.querySelectorAll('#side .dl.add').length, 2);
+  assert.strictEqual(w.document.querySelectorAll('#side .dl.del').length, 2);
+  assert.ok(w.document.getElementById('side').classList.contains('wide'));
+  // 그래프가 갱신돼도 diff 화면 유지
+  w.dispatchEvent(new w.MessageEvent('message', { data: { type: 'graph', graph: { nodes: g3.nodes, edges: g3.edges }, positions: {}, options: { showSubagents: true, windowHours: 24 } } }));
+  assert.strictEqual(w.document.querySelectorAll('#side .dl.add').length, 2);
+  w.document.querySelector('#side .back').dispatchEvent(new w.Event('click', { bubbles: true }));
+  assert.ok(w.document.querySelector('#side .fl'), '돌아가기 → 세션 상세');
   // 텍스트는 마크업으로 해석되지 않아야 함
   w.dispatchEvent(new w.MessageEvent('message', { data: { type: 'graph', graph: { nodes: [{ ...g3.nodes[0], label: '<img src=x onerror=alert(1)>' }], edges: [] }, positions: {}, options: { showSubagents: false, windowHours: 24 } } }));
   assert.strictEqual(w.document.querySelectorAll('#nodes img').length, 0);
