@@ -78,6 +78,7 @@ function panelHtml() {
   @keyframes ring { 0%{box-shadow:0 0 0 0 rgba(91,157,255,.5)} 70%{box-shadow:0 0 0 12px rgba(91,157,255,0)} 100%{box-shadow:0 0 0 0 rgba(91,157,255,0)} }
   .node .t { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
   .node .t b { font-size:13.5px; }
+  .node .t .chip { flex:0 0 auto; width:auto; }
   .node .r { font-size:11.5px; opacity:.75; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .node .s { font-size:11px; opacity:.6; }
   .node .s.on { color: var(--live); opacity:1; }
@@ -109,7 +110,41 @@ function panelHtml() {
   .dl.add { background: rgba(46,160,67,.18); } .dl.add .sg { color:#4CC38A; }
   .dl.del { background: rgba(248,81,73,.16); } .dl.del .sg { color:#F2797B; }
   .note { font-size:12px; opacity:.7; }
-  @media (prefers-reduced-motion: reduce) { .el.active, .node.live { animation:none; } }
+  /* 러너: 메시지는 캐릭터가 편지를 들고 뛰고, 수정은 망치질, 위임은 분신 */
+  svg.fx { position:absolute; left:0; top:0; overflow:visible; pointer-events:none; }
+  .fx .eye { fill:#14161b; }
+  .fx .shadow { fill:#000; opacity:.25; }
+  .breathe { animation: breathe 2.6s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100%; }
+  @keyframes breathe { 50% { transform: scale(1.03,.97); } }
+  .hop { animation: hop .5s ease-out; }
+  @keyframes hop { 40% { transform: translateY(-12px); } 100% { transform: translateY(0); } }
+  .leg { transform-box: fill-box; transform-origin: 50% 0; }
+  .running .leg.l { animation: legs .22s ease-in-out infinite alternate; }
+  .running .leg.r { animation: legs .22s ease-in-out infinite alternate-reverse; }
+  @keyframes legs { from { transform: rotate(32deg); } to { transform: rotate(-32deg); } }
+  .hammer { display:none; transform-box: fill-box; transform-origin: 30% 100%; }
+  .working .hammer { display:inline; animation: swing .32s ease-in-out infinite alternate; }
+  @keyframes swing { from { transform: rotate(-55deg); } to { transform: rotate(15deg); } }
+  .bub rect, .bub path { fill:#f3f1ea; }
+  .bub text { font-size:12px; font-weight:600; fill:#1b1e25; }
+  .bub.bad rect, .bub.bad path { fill: var(--viol); }
+  .bub.bad text { fill:#2a0d0e; }
+  .bub.got rect, .bub.got path { fill: var(--live); }
+  .bub.got text { fill:#0c2416; }
+  .fchip rect { fill: var(--vscode-editor-background); stroke:#E8A15A; }
+  .fchip text { font-family: var(--vscode-editor-font-family); font-size:11px; fill:#E8A15A; }
+  .fchip.sub rect { stroke: var(--live); } .fchip.sub text { fill: var(--live); }
+  .wall rect { fill: var(--viol); } .wall text { font-size:12px; font-weight:700; fill:#2a0d0e; }
+  .feed { position:absolute; right:12px; bottom:34px; width:min(330px, 60%); display:flex; flex-direction:column; gap:2px; pointer-events:none; }
+  .feed button { all:unset; pointer-events:auto; display:grid; grid-template-columns: 40px 30px minmax(0,1fr); gap:6px; padding:4px 8px; border-radius:6px; font-size:11.5px; cursor:pointer;
+    background: color-mix(in srgb, var(--vscode-editor-background) 82%, transparent); }
+  .feed button:hover, .feed button:focus-visible { background: var(--vscode-list-hoverBackground, rgba(127,127,127,.2)); }
+  .feed .t { font-family: var(--vscode-editor-font-family); font-size:10.5px; opacity:.6; }
+  .feed .k { font-weight:600; font-size:10.5px; }
+  .feed .d { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .feed .msg .k { color:#B48CF2; } .feed .block .k { color: var(--viol); } .feed .edit .k { color:#E8A15A; } .feed .sub .k { color: var(--live); }
+  .close { margin-left:auto; background:none; padding:2px 6px; opacity:.7; }
+  @media (prefers-reduced-motion: reduce) { .el.active, .node.live, .breathe, .running .leg, .working .hammer, .hop { animation:none; } }
   @media (max-width: 860px) { .main { flex-direction:column; } .tray { width:auto; max-height:22%; border-right:0; border-bottom:1px solid var(--line); } aside, aside.wide { width:auto; max-height:40%; border-left:0; border-top:1px solid var(--line); } .stage { min-height:300px; } }
 </style>
 </head>
@@ -120,6 +155,7 @@ function panelHtml() {
     <span class="stats" id="stats"></span>
     <div class="controls">
       <span class="seg" role="group" aria-label="모드"><button type="button" id="m-design" aria-pressed="false">설계</button><button type="button" id="m-flow" aria-pressed="true">실행 흐름</button></span>
+      <span class="seg" role="group" aria-label="움직임" id="fx-seg"><button type="button" data-fx="char" aria-pressed="true">캐릭터</button><button type="button" data-fx="dot" aria-pressed="false">점</button><button type="button" data-fx="off" aria-pressed="false">끄기</button></span>
       <button type="button" id="fix-names" hidden></button>
       <button type="button" id="connect-main" hidden>메인 ↔ 전원 연결</button>
       <label id="enf-wrap" hidden><input type="checkbox" id="enforce"> 차단</label>
@@ -129,12 +165,13 @@ function panelHtml() {
   <div class="main">
     <div class="tray" id="tray"></div>
     <div class="stage" id="stage">
-      <div class="world" id="world"><svg class="edges" id="edges" width="1" height="1"></svg><div id="nodes"></div></div>
+      <div class="world" id="world"><svg class="edges" id="edges" width="1" height="1"></svg><div id="nodes"></div><svg class="fx" id="fx" width="1" height="1"><g id="fx-chars"></g><g id="fx-runs"></g></svg></div>
       <div class="empty" id="empty" hidden>
         <p>아직 하네스가 없습니다. 왼쪽 세션을 이 캔버스로 끌어오거나, 이미 역할을 알고 있는 메인 세션에게 하네스 파일 작성을 맡기세요.</p>
         <button type="button" class="primary" id="ask-write">세션에게 하네스 작성 맡기기</button>
       </div>
       <div class="legend" id="legend"></div>
+      <div class="feed" id="feed" aria-label="방금 일어난 일"></div>
     </div>
     <aside id="side"></aside>
   </div>
@@ -185,6 +222,7 @@ function panelHtml() {
     document.body.classList.toggle('design', mode === 'design');
     $('m-design').setAttribute('aria-pressed', String(mode === 'design'));
     $('m-flow').setAttribute('aria-pressed', String(mode === 'flow'));
+    $('fx-seg').hidden = mode !== 'flow';
     $('connect-main').hidden = !(mode === 'design' && S.members.some((m) => m.main) && S.members.length > 1);
     $('enf-wrap').hidden = !S.exists;
     const unnamed = S.members.filter((m) => m.sid && !m.named).length;
@@ -198,11 +236,13 @@ function panelHtml() {
     $('stats').textContent = '멤버 ' + S.members.length + (live ? ' · 작업 중 ' + live : '') + ' · 멤버 간 메시지 ' + msgs;
     $('empty').hidden = S.members.length > 0;
     $('legend').replaceChildren(...(mode === 'flow'
-      ? ['━ 정한 방향 + 실제 메시지 수', '┅ 방금 오감', '┈ 정했지만 아직 안 오감', '┅ 빨강: 정한 방향 밖', '더블클릭: Claude Code 열기']
+      ? ['━ 정한 방향 + 실제 메시지 수', '┅ 방금 오감', '┈ 정했지만 아직 안 오감', '┅ 빨강: 정한 방향 밖', '클릭: 상세 · 더블클릭: Claude Code 열기']
       : ['보내는 세션 → 받는 세션 순서로 누르면 방향이 생깁니다', '화살표를 누르면 지울 수 있습니다']).map((t) => el('span', null, t)));
     renderTray();
     renderNodes();
     drawEdges();
+    syncChars();
+    renderFeed();
     renderSide();
   }
 
@@ -316,17 +356,15 @@ function panelHtml() {
   function renderSide() {
     const side = $('side');
     side.replaceChildren();
+    side.hidden = mode === 'flow' && !sel;
+    if (side.hidden) return;
     side.classList.toggle('wide', !!(sel && sel.type === 'diff'));
+    if (sel) { const c = btn('✕', 'close', () => select(null)); c.title = '닫기'; c.setAttribute('aria-label', '상세 닫기'); side.append(c); }
     if (sel && sel.type === 'diff') return renderDiff(side);
     if (sel && sel.type === 'member' && member(sel.name)) return renderMember(side, member(sel.name));
     if (sel && sel.type === 'tray') { const s = S.tray.find((x) => x.sid === sel.sid); if (s) return renderTraySide(side, s); }
     if (sel && sel.type === 'edge') return renderEdge(side);
     if (mode === 'design') return renderDesignHelp(side);
-    side.append(el('h2', null, '실행 흐름'));
-    side.append(el('div', 'muted', '노드를 누르면 그 세션의 역할, 주고받은 메시지, 바뀐 파일이 여기에 나옵니다. 화살표를 누르면 두 세션 사이의 메시지가 나옵니다.'));
-    const recent = S.traffic.slice().sort((a, b) => b.last - a.last).slice(0, 8);
-    if (recent.length) side.append(el('div', 'muted', '최근 오간 메시지'));
-    recent.forEach((t) => { const r = el('button', 'li'); r.type = 'button'; r.append(el('span', 'k', fmt(t.last)), el('span', 'v', t.from + ' → ' + t.to + ' (' + t.count + ')')); r.addEventListener('click', () => select({ type: 'edge', from: t.from, to: t.to })); side.append(r); });
   }
 
   function renderDesignHelp(side) {
@@ -501,6 +539,222 @@ function panelHtml() {
     select({ type: 'edge', from, to: m.name });
   }
 
+
+  // ── 캐릭터 · 러너 ──
+  // 새로 들어온 이벤트(idx 기준)만 재생한다. 처음 받은 상태는 기준점일 뿐 재생하지 않는다.
+  const PAL = ['#F2B84B', '#5B9DFF', '#5FCB8F', '#EE8FB5', '#B48CF2', '#4FC7C7', '#F08A5D', '#A5C85A'];
+  const reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const saved = (vscode.getState && vscode.getState()) || {};
+  let fxMode = saved.fx || 'char';
+  let seen = null;
+  const feed = [];
+  const chars = {};
+  const tickers = [];
+  let rafOn = false;
+  const SV = (tag, attrs, parent) => { const e = document.createElementNS(SVGNS, tag); for (const k in attrs || {}) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+  const base = (f) => String(f || '').split(/[\\\\/]/).pop();
+  const colorOf = (name) => { const i = S.members.findIndex((m) => key(m.name) === key(name)); return PAL[(i < 0 ? 0 : i) % PAL.length]; };
+  const shade = (hex, f) => { const n = parseInt(hex.slice(1), 16); return '#' + [n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.round(Math.min(255, v * f)).toString(16).padStart(2, '0')).join(''); };
+  const live = () => mode === 'flow' && fxMode !== 'off';
+
+  function makeChar(color, parent, o = {}) {
+    const root = SV('g', {}, parent);
+    const hopper = SV('g', {}, root);
+    SV('ellipse', { class: 'shadow', cx: 0, cy: 21, rx: 15, ry: 3.5 }, hopper);
+    SV('rect', { class: 'leg l', x: -8, y: 9, width: 5, height: 10, rx: 2.5, fill: shade(color, 0.62) }, hopper);
+    SV('rect', { class: 'leg r', x: 3, y: 9, width: 5, height: 10, rx: 2.5, fill: shade(color, 0.62) }, hopper);
+    const body = SV('g', { class: o.still ? '' : 'breathe' }, hopper);
+    if (o.ghost) SV('ellipse', { cx: 0, cy: 0, rx: 16, ry: 14, fill: 'none', stroke: color, 'stroke-width': 2.5, 'stroke-dasharray': '4 3' }, body);
+    else { SV('ellipse', { cx: 0, cy: 0, rx: 16, ry: 14, fill: color }, body); SV('ellipse', { cx: -5, cy: -6, rx: 6, ry: 3.5, fill: '#fff', opacity: 0.22 }, body); }
+    SV('path', { d: 'M0 -13 C -1 -19, -4 -21, -9 -21 C -8 -16, -4 -14, 0 -13 Z M0 -13 C 1 -18, 4 -20, 8 -19 C 6 -15, 3 -14, 0 -13 Z', fill: o.ghost ? color : shade(color, 1.25) }, body);
+    SV('circle', { class: 'eye', cx: -5, cy: -1, r: 2.3 }, body); SV('circle', { class: 'eye', cx: 5, cy: -1, r: 2.3 }, body);
+    SV('circle', { cx: -9, cy: 4, r: 2.2, fill: '#ff7a8a', opacity: 0.45 }, body); SV('circle', { cx: 9, cy: 4, r: 2.2, fill: '#ff7a8a', opacity: 0.45 }, body);
+    const ham = SV('g', { class: 'hammer' }, body);
+    SV('rect', { x: 15, y: -14, width: 3, height: 17, rx: 1, fill: '#a77b4f' }, ham);
+    SV('rect', { x: 10, y: -19, width: 13, height: 7, rx: 1.5, fill: '#9aa3b5' }, ham);
+    return { root, hopper };
+  }
+  const charAt = (name) => { const p = pos[name]; return p ? { x: p.x + W / 2 - 30, y: p.y - NH / 2 - 22 } : null; };
+
+  function syncChars() {
+    const layer = $('fx-chars');
+    const want = mode === 'flow' && fxMode === 'char';
+    for (const n in chars) if (!want || !member(n) || chars[n].color !== colorOf(n)) { chars[n].g.remove(); delete chars[n]; }
+    if (!want) return;
+    S.members.forEach((m) => {
+      let c = chars[m.name];
+      if (!c) { const g = SV('g', {}, layer); const inner = SV('g', { transform: 'scale(1.1)' }, g); c = chars[m.name] = { g, color: colorOf(m.name), ...makeChar(colorOf(m.name), inner) }; }
+      const a = charAt(m.name); if (a) c.g.setAttribute('transform', 'translate(' + a.x + ',' + a.y + ')');
+    });
+  }
+
+  function loop(now) {
+    for (let i = tickers.length - 1; i >= 0; i--) if (!tickers[i](now)) tickers.splice(i, 1);
+    if (tickers.length) requestAnimationFrame(loop); else rafOn = false;
+  }
+  function tick(fn) { tickers.push(fn); if (!rafOn) { rafOn = true; requestAnimationFrame(loop); } }
+
+  function bubble(parent, x, y, text, cls) {
+    const g = SV('g', { class: 'bub ' + (cls || ''), transform: 'translate(' + x + ',' + y + ')' }, parent);
+    const r = SV('rect', { rx: 8, height: 22, y: -22 }, g);
+    SV('path', { d: 'M -5 0 L 0 6 L 5 0 Z' }, g);
+    const t = SV('text', { x: 0, y: -7, 'text-anchor': 'middle' }, g); t.textContent = text;
+    let w = text.length * 11; try { w = t.getComputedTextLength() || w; } catch (e) { /* 추정치 */ }
+    r.setAttribute('width', w + 16); r.setAttribute('x', -(w + 16) / 2);
+    return g;
+  }
+  function floatChip(name, text, cls) {
+    const a = charAt(name) || pos[name]; if (!a) return;
+    const g = SV('g', { class: 'fchip ' + (cls || '') }, $('fx-runs'));
+    const r = SV('rect', { rx: 6, height: 20, y: -15 }, g);
+    const t = SV('text', { x: 0, y: 0, 'text-anchor': 'middle' }, g); t.textContent = text;
+    let w = text.length * 7; try { w = t.getComputedTextLength() || w; } catch (e) { /* 추정치 */ }
+    r.setAttribute('width', w + 14); r.setAttribute('x', -(w + 14) / 2);
+    const t0 = performance.now(), ms = 2200;
+    tick((now) => {
+      const p = Math.min(1, (now - t0) / ms), c = charAt(name) || a;
+      g.setAttribute('transform', 'translate(' + (c.x - 40) + ',' + (c.y - 26 - p * 24) + ')');
+      g.setAttribute('opacity', p < 0.75 ? 1 : (1 - p) / 0.25);
+      if (p >= 1) { g.remove(); return false; }
+      return true;
+    });
+  }
+  function hop(name, text) {
+    const c = chars[name];
+    if (c) { c.hopper.classList.remove('hop'); c.hopper.getBoundingClientRect(); c.hopper.classList.add('hop'); setTimeout(() => c.hopper.classList.remove('hop'), 600); }
+    const a = charAt(name);
+    if (a && fxMode === 'char') { const b = bubble($('fx-runs'), a.x, a.y - 30, text, 'got'); setTimeout(() => b.remove(), 1300); }
+  }
+
+  function runMsg(ev) {
+    const A = member(ev.from), B = member(ev.to);
+    if (!A || !B || !pos[A.name] || !pos[B.name]) return;
+    const both = S.traffic.some((t) => key(t.from) === key(ev.to) && key(t.to) === key(ev.from)) || hasRule(ev.to, ev.from);
+    const ends = () => {
+      const pa = pos[A.name], pb = pos[B.name];
+      let dx = pb.x - pa.x, dy = pb.y - pa.y; const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
+      const off = both ? 9 : 0, nx = -dy * off, ny = dx * off;
+      return { a: rectPoint({ x: pa.x + nx, y: pa.y + ny }, W + 16, NH + 16, dx, dy), b: rectPoint({ x: pb.x + nx, y: pb.y + ny }, W + 22, NH + 22, -dx, -dy), dx };
+    };
+    const e0 = ends(); const dist = Math.hypot(e0.b.x - e0.a.x, e0.b.y - e0.a.y);
+    const dur = reduce ? 300 : Math.max(900, Math.min(3200, dist * 6));
+    const g = SV('g', {}, $('fx-runs')); const flip = SV('g', {}, g); const bob = SV('g', {}, flip);
+    const color = colorOf(A.name);
+    let bub = null;
+    if (fxMode === 'char') {
+      const c = makeChar(color, bob, { still: true }); c.root.setAttribute('transform', 'scale(.85)'); c.root.classList.add('running');
+      const env = SV('g', { transform: 'translate(13,3) rotate(-8)' }, bob);
+      SV('rect', { x: 0, y: -6, width: 15, height: 11, rx: 1.5, fill: '#f3f1ea', stroke: '#c9c4b6' }, env);
+      SV('path', { d: 'M0 -6 L7.5 0 L15 -6', fill: 'none', stroke: '#b9b3a3', 'stroke-width': 1.2 }, env);
+      const txt = ev.text.replace(/\\s+/g, ' ').trim();
+      bub = bubble(g, 0, -28, txt.length > 14 ? txt.slice(0, 14) + '…' : txt || '✉');
+    } else {
+      SV('circle', { r: 6, fill: color }, bob); SV('circle', { r: 11, fill: 'none', stroke: color, opacity: 0.4 }, bob);
+    }
+    const blocked = ev.kind === 'block', stopAt = blocked ? 0.62 : 1;
+    const t0 = performance.now(); let back = 0, wall = null;
+    tick((now) => {
+      const { a, b, dx } = ends();
+      let p;
+      if (!back) {
+        p = Math.min(stopAt, (now - t0) / dur);
+        if (p >= stopAt) {
+          if (!blocked) { g.remove(); hop(B.name, '받음 ✉'); return false; }
+          back = now;
+          wall = SV('g', { class: 'wall', transform: 'translate(' + (a.x + (b.x - a.x) * 0.7) + ',' + (a.y + (b.y - a.y) * 0.7) + ')' }, $('fx-runs'));
+          SV('rect', { x: -5, y: -20, width: 10, height: 38, rx: 3 }, wall);
+          const x = SV('text', { x: 0, y: 4, 'text-anchor': 'middle' }, wall); x.textContent = '✕';
+          if (bub) { bub.remove(); bub = bubble(g, 0, -28, '차단됨', 'bad'); }
+        }
+      } else {
+        const q = Math.min(1, (now - back) / (dur * 0.45));
+        p = stopAt * (1 - q);
+        if (q >= 1) { g.remove(); setTimeout(() => wall && wall.remove(), 900); return false; }
+      }
+      const x = a.x + (b.x - a.x) * p, y = a.y + (b.y - a.y) * p;
+      g.setAttribute('transform', 'translate(' + x + ',' + y + ')');
+      flip.setAttribute('transform', (back ? dx > 0 : dx < 0) ? 'scale(-1,1)' : '');
+      bob.setAttribute('transform', 'translate(0,' + (reduce ? 0 : -Math.abs(Math.sin(p * dist / 16)) * 5) + ')');
+      return true;
+    });
+  }
+  function runEdit(ev) {
+    const c = chars[ev.from];
+    if (c) { c.root.classList.add('working'); clearTimeout(c.tm); c.tm = setTimeout(() => c.root.classList.remove('working'), 1800); }
+    floatChip(ev.from, '± ' + ev.file);
+  }
+  function runSub(ev) {
+    floatChip(ev.from, ev.agent, 'sub');
+    if (fxMode !== 'char' || reduce) return;
+    const color = colorOf(ev.from);
+    for (let i = 0; i < 2; i++) {
+      const g = SV('g', {}, $('fx-runs')); const inner = SV('g', {}, g);
+      const c = makeChar(color, inner, { ghost: true, still: true }); c.root.classList.add('running');
+      const t0 = performance.now(), ms = 2600, ph = i * Math.PI;
+      tick((now) => {
+        const p = Math.min(1, (now - t0) / ms), ctr = pos[member(ev.from) ? member(ev.from).name : ''];
+        if (!ctr) { g.remove(); return false; }
+        const r = Math.sin(Math.PI * p), ang = ph + p * Math.PI * 3;
+        g.setAttribute('transform', 'translate(' + (ctr.x + Math.cos(ang) * r * (W / 2 + 26)) + ',' + (ctr.y + Math.sin(ang) * r * (NH / 2 + 22)) + ')');
+        inner.setAttribute('transform', 'scale(' + (Math.cos(ang) < 0 ? -0.5 : 0.5) + ',.5)');
+        if (p >= 1) { g.remove(); return false; }
+        return true;
+      });
+    }
+  }
+  function play(ev) {
+    if (!live()) return;
+    if (ev.kind === 'msg' || ev.kind === 'block') runMsg(ev);
+    else if (ev.kind === 'edit') runEdit(ev);
+    else if (ev.kind === 'sub') runSub(ev);
+  }
+
+  // 새 활동 찾기: 메시지는 멤버 사이 traffic, 수정·위임은 멤버의 최근 활동
+  function detect() {
+    const out = []; let max = seen == null ? -1 : seen;
+    S.traffic.forEach((t) => t.messages.forEach((x) => {
+      if (x.idx == null) return; max = Math.max(max, x.idx);
+      if (seen != null && x.idx > seen) out.push({ idx: x.idx, ts: x.ts, kind: x.blocked ? 'block' : 'msg', from: t.from, to: t.to, text: x.text || '' });
+    }));
+    S.members.forEach((m) => (m.recent || []).forEach((e) => {
+      if (e.idx == null) return; max = Math.max(max, e.idx);
+      if (seen == null || e.idx <= seen) return;
+      if (e.hasDiff && e.file) out.push({ idx: e.idx, ts: e.ts, kind: 'edit', from: m.name, file: base(e.file) });
+      else if (e.kind === 'delegate') out.push({ idx: e.idx, ts: e.ts, kind: 'sub', from: m.name, agent: e.target || e.agent || '서브에이전트' });
+    }));
+    const seenIdx = new Set();
+    seen = max;
+    return out.filter((x) => !seenIdx.has(x.idx) && seenIdx.add(x.idx)).sort((a, b) => a.idx - b.idx);
+  }
+  function playBatch(list) {
+    if (!list.length) return;
+    list.forEach((ev) => feed.unshift(ev));
+    feed.splice(5);
+    renderFeed();
+    list.slice(-6).forEach((ev, i) => setTimeout(() => play(ev), i * 450));
+  }
+  const KIND = { msg: '보냄', block: '차단', edit: '수정', sub: '위임' };
+  function renderFeed() {
+    const box = $('feed');
+    box.hidden = mode !== 'flow' || !feed.length;
+    box.replaceChildren(...feed.map((ev) => {
+      const b = el('button', ev.kind); b.type = 'button'; b.title = '다시 재생';
+      const d = ev.kind === 'edit' ? ev.from + ' · ' + ev.file : ev.kind === 'sub' ? ev.from + ' · ' + ev.agent : ev.from + ' → ' + ev.to + ': ' + ev.text;
+      b.append(el('span', 't', fmt(ev.ts)), el('span', 'k', KIND[ev.kind]), el('span', 'd', d));
+      b.addEventListener('click', (e) => { e.stopPropagation(); play(ev); });
+      b.addEventListener('pointerdown', (e) => e.stopPropagation());
+      return b;
+    }));
+  }
+  document.querySelectorAll('[data-fx]').forEach((b) => b.addEventListener('click', () => {
+    fxMode = b.dataset.fx;
+    try { vscode.setState({ ...((vscode.getState && vscode.getState()) || {}), fx: fxMode }); } catch (e) { /* 상태 저장 실패는 무시 */ }
+    document.querySelectorAll('[data-fx]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    $('fx-runs').replaceChildren(); tickers.length = 0;
+    syncChars();
+  }));
+  document.querySelectorAll('[data-fx]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.fx === fxMode)));
+
   // ── 노드 드래그 / 화면 이동 / 끌어다 놓기 ──
   const applyView = () => { $('world').style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.k + ')'; };
   function attachNode(b, m) {
@@ -516,7 +770,7 @@ function panelHtml() {
         moved = true;
         pos[m.name] = { x: Math.round(p0.x + dx), y: Math.round(p0.y + dy) };
         b.style.left = (pos[m.name].x - W / 2) + 'px'; b.style.top = (pos[m.name].y - NH / 2) + 'px';
-        drawEdges();
+        drawEdges(); syncChars();
       };
       const up = () => {
         b.removeEventListener('pointermove', move); b.removeEventListener('pointerup', up);
@@ -594,8 +848,11 @@ function panelHtml() {
       if (sel && sel.type === 'member' && !member(sel.name)) sel = null;
       if (sel && sel.type === 'tray' && !S.tray.some((x) => x.sid === sel.sid)) sel = null;
       layout();
+      if (S.members.map((x) => x.name).join('|') !== before) seen = null; // 멤버가 바뀌면 지난 기록은 재생하지 않고 기준점만 다시 잡는다
+      const fresh = detect();
       render();
       if (firstFit || S.members.map((x) => x.name).join('|') !== before) { fit(); firstFit = false; }
+      playBatch(fresh);
     } else if (m.type === 'diffResult') {
       if (diffState && diffState.key === m.key) { diffState.data = m.diff; renderSide(); }
     }

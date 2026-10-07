@@ -49,7 +49,7 @@ button('이름 붙이고 추가').click();
 assert.deepStrictEqual({ ...last('addMember') }, { type: 'addMember', sid: 'x-id', name: 'TTA 전문가', rename: true, at: null });
 
 // 2) 하네스 있음: 실행 흐름
-const S = {
+const S0 = {
   folder: '/k', name: 'kftc', exists: true, enforce: false, layout: {},
   members: [member('메인 핸들러', { main: true, live: true, role: '총괄' }), member('GNN', { role: 'GNN 학습', external: { out: 1, in: 1, messages: [{ ts: new Date(now).toISOString(), text: '외부로', dir: 'out', via: '세션 98cfaf' }] }, changedFiles: [{ file: '/k/a.py', edits: 2, first: 3, last: 7, ts: new Date(now).toISOString() }] }), member('RAG 및 LLM'), member('TTA 전문가', { named: false })],
   edges: [{ from: '메인 핸들러', to: 'GNN' }, { from: '메인 핸들러', to: 'TTA 전문가' }],
@@ -60,7 +60,35 @@ const S = {
   ],
   tray: [],
 };
+push(S0);
+// 첫 상태는 기준점: 러너 없음, 상세 패널은 닫힘(노드를 눌러야 열림)
+D.getElementById('m-flow').click();
+assert.strictEqual(D.getElementById('side').hidden, true, '선택 없으면 상세 숨김');
+assert.strictEqual(D.querySelectorAll('#fx-runs > g').length, 0);
+assert.strictEqual(D.querySelectorAll('#fx-chars > g').length, 4, '멤버마다 캐릭터');
+// 새 메시지·수정·위임이 들어오면 재생 + 하단 피드
+const S = JSON.parse(JSON.stringify(S0));
+S.traffic[0].messages.push({ ts: new Date(now).toISOString(), text: '새 지시', idx: 50 });
+S.traffic[0].count++;
+S.traffic[2].messages.push({ ts: new Date(now).toISOString(), text: '몰래', idx: 51, blocked: true });
+S.members[1].recent = [{ idx: 52, kind: 'tool', tool: 'Edit', file: '/k/b.py', hasDiff: true, ts: new Date(now).toISOString() }, { idx: 53, kind: 'delegate', target: 'Explore', ts: new Date(now).toISOString() }];
 push(S);
+const feed = [...D.querySelectorAll('#feed button')].map((b) => b.textContent);
+assert.strictEqual(feed.length, 4);
+assert.ok(feed.some((t) => t.includes('보냄') && t.includes('메인 핸들러 → GNN: 새 지시')));
+assert.ok(feed.some((t) => t.includes('차단') && t.includes('몰래')));
+assert.ok(feed.some((t) => t.includes('수정') && t.includes('b.py')));
+assert.ok(feed.some((t) => t.includes('위임') && t.includes('Explore')));
+D.querySelector('#feed button.msg').click();
+assert.ok(D.querySelectorAll('#fx-runs > g').length >= 1, '다시 재생하면 러너 생김');
+assert.ok([...D.querySelectorAll('#fx-runs text')].some((t) => t.textContent === '새 지시'), '말풍선에 메시지');
+push(S); // 같은 상태 다시 와도 중복 재생 없음
+assert.strictEqual(D.querySelectorAll('#feed button').length, 4);
+// 움직임 끄기 → 캐릭터 사라짐, 다시 켜기
+D.querySelector('[data-fx=off]').click();
+assert.strictEqual(D.querySelectorAll('#fx-chars > g').length, 0);
+D.querySelector('[data-fx=char]').click();
+assert.strictEqual(D.querySelectorAll('#fx-chars > g').length, 4);
 assert.strictEqual(D.getElementById('empty').hidden, true);
 assert.strictEqual(D.querySelectorAll('.node').length, 4);
 assert.ok(node('메인 핸들러').querySelector('.chip.main'));
@@ -79,6 +107,7 @@ assert.strictEqual(D.getElementById('enf-wrap').hidden, false);
 // 노드 상세
 click(node('GNN'));
 const side = () => D.getElementById('side').textContent;
+assert.strictEqual(D.getElementById('side').hidden, false, '노드 클릭하면 상세 열림');
 assert.ok(side().includes('주소: GNN (/rename 이름)') && side().includes('보낼 수 있음: 없음') && side().includes('받는 곳: 메인 핸들러'));
 const role = D.getElementById('role-input');
 role.value = 'GNN 학습·평가'; role.dispatchEvent(new w.Event('change'));
@@ -98,6 +127,8 @@ w.dispatchEvent(new w.MessageEvent('message', { data: { type: 'diffResult', key:
 assert.strictEqual(D.querySelectorAll('#side .dl.add').length, 1);
 [...D.querySelectorAll('#side button')].find((b) => b.textContent === '← 돌아가기').click();
 assert.ok(D.getElementById('role-input'), '돌아가면 멤버 상세');
+D.querySelector('#side .close').click();
+assert.strictEqual(D.getElementById('side').hidden, true, '닫기');
 // 이름 아직 안 맞는 멤버: /rename 채우기 버튼
 click(node('TTA 전문가'));
 button('이 세션에서 /rename TTA 전문가 입력하기').click();
@@ -141,4 +172,4 @@ assert.ok(!node('TTA 전문가'));
 push({ ...S, members: [member('<img src=x onerror=alert(1)>')], edges: [], traffic: [] });
 assert.strictEqual(D.querySelectorAll('#nodes img').length, 0);
 
-console.log('OK — v2 panel: empty/tray/drop/rename-add, flow edges (active/plan/viol/blocked), inspector, instruct, diff, design rules, main/remove, XSS-safe');
+console.log('OK — v2 panel: runners/feed/fx toggle, click-only side, empty/tray/drop/rename-add, flow edges (active/plan/viol/blocked), inspector, instruct, diff, design rules, main/remove, XSS-safe');
