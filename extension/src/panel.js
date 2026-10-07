@@ -38,8 +38,17 @@ function panelHtml() {
   .seg button { border-radius:0; background:transparent; color: var(--vscode-foreground); }
   .seg button[aria-pressed=true] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
   .main { flex:1; display:flex; min-height:0; }
-  .tray { width:250px; flex-shrink:0; border-right:1px solid var(--line); overflow:auto; padding:14px; display:flex; flex-direction:column; gap:8px; }
-  .tray h2, aside h2 { font-size:13px; margin:0; overflow-wrap:anywhere; }
+  aside h2, .sheet h2 { font-size:13px; margin:0; overflow-wrap:anywhere; }
+  .modal { position:fixed; inset:0; z-index:20; display:flex; align-items:flex-start; justify-content:center; padding:56px 16px 16px; background: rgba(0,0,0,.45); }
+  .sheet { width:min(560px, 100%); max-height:calc(100vh - 80px); display:flex; flex-direction:column; gap:10px; padding:16px; border-radius:12px; overflow:hidden;
+    background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526)); border:1px solid var(--line); box-shadow:0 12px 40px rgba(0,0,0,.4); }
+  .sheet .mh { display:flex; align-items:center; gap:8px; }
+  .alist { display:flex; flex-direction:column; gap:8px; overflow:auto; padding:2px; }
+  .aitem { display:flex; flex-direction:column; gap:8px; }
+  .aitem .row { align-items:center; }
+  .aitem input { flex:1; min-width:160px; width:auto; }
+  .resizer { width:6px; flex-shrink:0; cursor:col-resize; background:transparent; border-left:1px solid var(--line); touch-action:none; }
+  .resizer:hover, .resizer.drag, .resizer:focus-visible { background: var(--accent); opacity:.6; outline:none; }
   .muted { font-size:12px; opacity:.72; line-height:1.55; overflow-wrap:anywhere; }
   .titem { all:unset; display:flex; flex-direction:column; gap:3px; padding:9px 11px; border-radius:9px; border:1px dashed var(--line); cursor:grab; }
   .titem:hover, .titem:focus-visible { border-color: var(--accent); }
@@ -86,7 +95,7 @@ function panelHtml() {
   .empty > * { pointer-events:auto; }
   .empty p { margin:0; max-width:420px; line-height:1.7; opacity:.8; }
   .legend { position:absolute; left:12px; bottom:10px; display:flex; flex-wrap:wrap; gap:4px 14px; font-size:11px; opacity:.62; pointer-events:none; }
-  aside { width:340px; flex-shrink:0; border-left:1px solid var(--line); overflow:auto; padding:16px; display:flex; flex-direction:column; gap:11px; }
+  aside { width:380px; flex-shrink:0; overflow:auto; padding:16px; display:flex; flex-direction:column; gap:11px; }
   aside.wide { width:min(620px, 55%); }
   .row { display:flex; gap:8px; flex-wrap:wrap; }
   .hr { height:1px; background: var(--line); }
@@ -149,7 +158,7 @@ function panelHtml() {
   .lhead button { margin-left:auto; }
   .close { margin-left:auto; background:none; padding:2px 6px; opacity:.7; }
   @media (prefers-reduced-motion: reduce) { .el.active, .node.live, .breathe, .running .leg, .working .hammer, .hop { animation:none; } }
-  @media (max-width: 860px) { .main { flex-direction:column; } .tray { width:auto; max-height:22%; border-right:0; border-bottom:1px solid var(--line); } aside, aside.wide { width:auto; max-height:40%; border-left:0; border-top:1px solid var(--line); } .stage { min-height:300px; } }
+  @media (max-width: 860px) { .main { flex-direction:column; } .resizer { display:none; } aside, aside.wide { width:auto; max-height:40%; border-left:0; border-top:1px solid var(--line); } .stage { min-height:300px; } }
 </style>
 </head>
 <body>
@@ -160,6 +169,7 @@ function panelHtml() {
     <div class="controls">
       <span class="seg" role="group" aria-label="모드"><button type="button" id="m-design" aria-pressed="false">설계</button><button type="button" id="m-flow" aria-pressed="true">실행 흐름</button></span>
       <span class="seg" role="group" aria-label="움직임" id="fx-seg"><button type="button" data-fx="char" aria-pressed="true">캐릭터</button><button type="button" data-fx="dot" aria-pressed="false">점</button><button type="button" data-fx="off" aria-pressed="false">끄기</button></span>
+      <button type="button" class="primary" id="add-session">+ 세션 추가</button>
       <button type="button" id="fix-names" hidden></button>
       <button type="button" id="connect-main" hidden>메인 ↔ 전원 연결</button>
       <label id="enf-wrap" hidden><input type="checkbox" id="enforce"> 차단</label>
@@ -167,16 +177,23 @@ function panelHtml() {
     </div>
   </header>
   <div class="main">
-    <div class="tray" id="tray"></div>
     <div class="stage" id="stage">
       <div class="world" id="world"><svg class="edges" id="edges" width="1" height="1"></svg><div id="nodes"></div><svg class="fx" id="fx" width="1" height="1"><g id="fx-chars"></g><g id="fx-runs"></g></svg></div>
       <div class="empty" id="empty" hidden>
-        <p>아직 하네스가 없습니다. 왼쪽 세션을 이 캔버스로 끌어오거나, 이미 역할을 알고 있는 메인 세션에게 하네스 파일 작성을 맡기세요.</p>
-        <button type="button" class="primary" id="ask-write">세션에게 하네스 작성 맡기기</button>
+        <p>아직 하네스가 없습니다. "세션 추가"로 이 폴더의 세션을 멤버로 넣거나, 이미 역할을 알고 있는 메인 세션에게 하네스 파일 작성을 맡기세요.</p>
+        <div class="row"><button type="button" class="primary" id="empty-add">세션 추가</button><button type="button" id="ask-write">세션에게 하네스 작성 맡기기</button></div>
       </div>
       <div class="legend" id="legend"></div>
     </div>
+    <div class="resizer" id="resizer" role="separator" aria-orientation="vertical" aria-label="이벤트 창 폭" tabindex="0" title="끌어서 폭 조절"></div>
     <aside id="side"></aside>
+  </div>
+</div>
+<div class="modal" id="add-modal" hidden role="dialog" aria-modal="true" aria-labelledby="add-title">
+  <div class="sheet">
+    <div class="mh"><h2 id="add-title">세션 추가</h2><button type="button" class="close" id="add-close" aria-label="닫기">✕</button></div>
+    <div class="muted">이 폴더에서 작업한 세션 중 아직 멤버가 아닌 것들입니다. 누르면 멤버로 들어갑니다. 이름(/rename)이 없는 세션은 이름을 붙여서 넣습니다.</div>
+    <div class="alist" id="add-list"></div>
   </div>
 </div>
 
@@ -188,13 +205,14 @@ function panelHtml() {
   const W = 184, NH = 78;
   let S = { members: [], edges: [], traffic: [], tray: [], layout: {}, enforce: false, exists: false, name: '' };
   let mode = 'flow';
-  let sel = null;            // {type:'member', name} | {type:'tray', sid} | {type:'edge', from, to} | {type:'diff', ...}
+  let sel = null;            // {type:'log', name} | {type:'member', name} | {type:'edge', from, to} | {type:'diff', ...}
   let connectFrom = null;
   let pos = {};
   let view = { x: 0, y: 0, k: 1 };
   let firstFit = true;
   let diffState = null;
   let instructOpen = false;
+  let sideW = Math.max(260, Number(((vscode.getState && vscode.getState()) || {}).sideW) || 380);
 
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const btn = (text, cls, fn) => { const b = el('button', cls || '', text); b.type = 'button'; b.addEventListener('click', fn); return b; };
@@ -241,18 +259,25 @@ function panelHtml() {
     $('legend').replaceChildren(...(mode === 'flow'
       ? ['━ 정한 방향 + 실제 메시지 수', '┅ 방금 오감', '┈ 정했지만 아직 안 오감', '┅ 빨강: 정한 방향 밖', '클릭: 이벤트 · 더블클릭: 설정']
       : ['보내는 세션 → 받는 세션 순서로 누르면 방향이 생깁니다', '화살표를 누르면 지울 수 있습니다']).map((t) => el('span', null, t)));
-    renderTray();
+    $('add-session').textContent = '+ 세션 추가' + (S.tray.length ? ' (' + S.tray.length + ')' : '');
+    if (!$('add-modal').hidden) renderAddList();
     renderNodes();
     drawEdges();
     syncChars();
     renderSide();
   }
 
-  function renderTray() {
-    const t = $('tray');
-    t.replaceChildren(el('h2', null, '이 폴더의 다른 세션'), el('div', 'muted', '캔버스로 끌어오거나 눌러서 멤버로 추가합니다. 이름이 없는 세션은 추가할 때 이름(/rename)을 붙입니다.'));
-    if (!S.tray.length) t.append(el('div', 'muted', '다른 세션이 없습니다.'));
+  // ── 세션 추가 팝업 ──
+  let addPick = null; // 이름 붙이는 중인 세션
+  function openAdd(pick) { addPick = pick || null; $('add-modal').hidden = false; renderAddList(); const f = $('add-modal').querySelector(addPick ? '#new-name' : '.titem'); if (f) f.focus(); }
+  function closeAdd() { $('add-modal').hidden = true; addPick = null; }
+  function centerWorld() { const r = stage.getBoundingClientRect(); return toWorld(r.left + r.width / 2 + (Math.random() - 0.5) * 120, r.top + r.height / 2 + (Math.random() - 0.5) * 80); }
+  function renderAddList() {
+    const box = $('add-list');
+    box.replaceChildren();
+    if (!S.tray.length) { box.append(el('div', 'muted', '추가할 세션이 없습니다. 이 폴더의 세션은 모두 멤버입니다.')); return; }
     S.tray.forEach((s) => {
+      const wrap = el('div', 'aitem');
       const b = el('button', 'titem');
       b.type = 'button'; b.draggable = true; b.dataset.sid = s.sid;
       const r1 = el('span', 'row1');
@@ -261,9 +286,22 @@ function panelHtml() {
       else if (s.live) r1.append(el('span', 'chip live', '작업 중'));
       b.append(r1, el('span', 'm', '마지막 ' + ago(s.last) + ' · ' + s.eventCount + ' events'));
       if (s.firstPrompt) b.append(el('span', 'q', s.firstPrompt));
-      b.addEventListener('click', () => select({ type: 'tray', sid: s.sid }));
+      b.addEventListener('click', () => {
+        if (s.name) { addMember(s.sid, s.name, false, centerWorld()); closeAdd(); return; }
+        addPick = addPick === s.sid ? null : s.sid; renderAddList();
+        const f = $('new-name'); if (f) f.focus();
+      });
       b.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', s.sid); e.dataTransfer.effectAllowed = 'copy'; });
-      t.append(b);
+      wrap.append(b);
+      if (addPick === s.sid) {
+        const row = el('div', 'row');
+        const inp = document.createElement('input'); inp.type = 'text'; inp.id = 'new-name'; inp.placeholder = '붙일 이름 (예: GNN)'; inp.setAttribute('aria-label', '붙일 이름');
+        const go = () => { const v = inp.value.trim(); if (v) { addMember(s.sid, v, true, centerWorld()); closeAdd(); } };
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+        row.append(inp, btn('이름 붙이고 추가', 'primary', go), btn('Claude Code 열기', '', () => send({ type: 'openSession', sid: s.sid })));
+        wrap.append(row, el('div', 'muted', '추가하면 그 세션 입력창에 /rename 이 채워집니다. 엔터만 누르면 됩니다.'));
+      }
+      box.append(wrap);
     });
   }
 
@@ -359,6 +397,7 @@ function panelHtml() {
     const side = $('side');
     side.replaceChildren();
     side.classList.toggle('wide', !!(sel && sel.type === 'diff'));
+    side.style.width = (sel && sel.type === 'diff' ? Math.max(sideW, Math.min(620, window.innerWidth * 0.55)) : sideW) + 'px';
     if (mode === 'flow' && (!sel || sel.type === 'log')) return renderLog(side, sel ? sel.name : null);
     if (sel) {
       const back = sel.type === 'member' ? { type: 'log', name: sel.name } : null;
@@ -366,7 +405,6 @@ function panelHtml() {
     }
     if (sel && sel.type === 'diff') return renderDiff(side);
     if (sel && sel.type === 'member' && member(sel.name)) return renderMember(side, member(sel.name));
-    if (sel && sel.type === 'tray') { const s = S.tray.find((x) => x.sid === sel.sid); if (s) return renderTraySide(side, s); }
     if (sel && sel.type === 'edge') return renderEdge(side);
     if (mode === 'design') return renderDesignHelp(side);
   }
@@ -450,22 +488,6 @@ function panelHtml() {
     const b = el('div', 'msg' + (out ? ' out' : ''));
     b.append(el('span', 'h', fmt(x.ts) + ' · ' + x.from + ' → ' + x.to + (x.blocked ? ' · 차단됨' : '')), el('span', 'b', x.text || ''));
     return b;
-  }
-
-  function renderTraySide(side, s) {
-    side.append(el('h2', null, s.label));
-    side.append(el('div', 'muted', '마지막 활동 ' + ago(s.last) + ' · ' + s.eventCount + ' events · ' + s.sid.slice(0, 8)));
-    if (s.firstPrompt) side.append(el('div', 'muted', '첫 질문: ' + s.firstPrompt));
-    if (s.name) {
-      side.append(el('div', 'muted', '이름(/rename): ' + s.name));
-      side.append(btn('"' + s.name + '"을(를) 멤버로 추가', 'primary', () => addMember(s.sid, s.name)));
-    } else {
-      side.append(el('div', 'warn', '이 세션은 이름(/rename)이 없습니다. 재시작하면 바뀌는 자동 이름만 있어서, 멤버로 넣으려면 이름을 붙여야 합니다.'));
-      const inp = document.createElement('input'); inp.type = 'text'; inp.id = 'new-name'; inp.placeholder = '붙일 이름 (예: GNN)'; inp.setAttribute('aria-label', '붙일 이름');
-      side.append(inp, btn('이름 붙이고 추가', 'primary', () => { const v = inp.value.trim(); if (v) addMember(s.sid, v, true); }));
-      side.append(el('div', 'muted', '추가하면 그 세션이 열리고 입력창에 /rename 이 채워집니다. 엔터만 누르면 됩니다.'));
-    }
-    side.append(btn('Claude Code 열기', '', () => send({ type: 'openSession', sid: s.sid })));
   }
 
   function addMember(sid, name, needsRename, at) {
@@ -812,7 +834,7 @@ function panelHtml() {
     const s = S.tray.find((x) => x.sid === sid);
     if (!s) return;
     if (s.name) addMember(s.sid, s.name, false, toWorld(e.clientX, e.clientY));
-    else select({ type: 'tray', sid }); // 이름부터 붙이기
+    else openAdd(sid); // 이름부터 붙이기
   });
 
   function fit() {
@@ -836,8 +858,36 @@ function panelHtml() {
     send({ type: 'connectMain' }); recalcOk(); render();
   });
   $('ask-write').addEventListener('click', () => send({ type: 'askWrite' }));
+  $('add-session').addEventListener('click', () => openAdd());
+  $('empty-add').addEventListener('click', () => openAdd());
+  $('add-close').addEventListener('click', closeAdd);
+  $('add-modal').addEventListener('click', (e) => { if (e.target === $('add-modal')) closeAdd(); });
+
+  // 이벤트 창 폭 조절 (끌기 / 방향키), 폭은 기억한다
+  const setSideW = (w, save) => {
+    sideW = Math.round(Math.max(260, Math.min(w, window.innerWidth * 0.7 || w)));
+    $('side').style.width = sideW + 'px';
+    if (save) { try { vscode.setState({ ...((vscode.getState && vscode.getState()) || {}), sideW }); } catch (e) { /* ignore */ } }
+  };
+  $('resizer').addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    const rz = $('resizer'); rz.classList.add('drag');
+    try { rz.setPointerCapture(ev.pointerId); } catch (e) { /* jsdom */ }
+    const x0 = ev.clientX, w0 = sideW;
+    const move = (e) => setSideW(w0 + (x0 - e.clientX), false);
+    const up = () => { rz.classList.remove('drag'); rz.removeEventListener('pointermove', move); rz.removeEventListener('pointerup', up); setSideW(sideW, true); };
+    rz.addEventListener('pointermove', move); rz.addEventListener('pointerup', up);
+  });
+  $('resizer').addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') { setSideW(sideW + 24, true); e.preventDefault(); }
+    if (e.key === 'ArrowRight') { setSideW(sideW - 24, true); e.preventDefault(); }
+  });
   $('fix-names').addEventListener('click', () => send({ type: 'fixNames' }));
-  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && connectFrom) { connectFrom = null; render(); } });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('add-modal').hidden) { closeAdd(); return; }
+    if (e.key === 'Escape' && connectFrom) { connectFrom = null; render(); }
+  });
   window.addEventListener('resize', () => { if (firstFit) fit(); });
 
   window.addEventListener('message', (ev) => {
@@ -848,7 +898,6 @@ function panelHtml() {
       pos = Object.assign({}, S.layout || {}, pos);
       Object.keys(pos).forEach((k) => { if (!member(k)) delete pos[k]; });
       if (sel && (sel.type === 'member' || sel.type === 'log') && !member(sel.name)) sel = null;
-      if (sel && sel.type === 'tray' && !S.tray.some((x) => x.sid === sel.sid)) sel = null;
       layout();
       if (S.members.map((x) => x.name).join('|') !== before) seen = null; // 멤버가 바뀌면 지난 기록은 재생하지 않고 기준점만 다시 잡는다
       const fresh = detect();

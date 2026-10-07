@@ -32,21 +32,31 @@ assert.ok(posted.some((m) => m.type === 'ready'));
 push({ folder: '/k', name: 'kftc', exists: false, enforce: false, members: [], edges: [], traffic: [], layout: {},
   tray: [{ sid: 'm-id', name: '메인 핸들러', label: '메인 핸들러', last: now, eventCount: 9, live: true, firstPrompt: '역할 나눠서' }, { sid: 'x-id', name: '', label: '세션 98cfaf', last: now, eventCount: 3, live: false, firstPrompt: '로더 확인' }] });
 assert.strictEqual(D.getElementById('empty').hidden, false);
-assert.strictEqual(D.querySelectorAll('.titem').length, 2);
-assert.ok(D.querySelector('.titem .chip.need'), '이름 필요 표시');
+assert.ok(!D.getElementById('tray'), '왼쪽 목록 없음');
+assert.strictEqual(D.getElementById('add-session').textContent, '+ 세션 추가 (2)');
+// 세션 추가 팝업
+D.getElementById('add-session').click();
+assert.strictEqual(D.getElementById('add-modal').hidden, false);
+assert.strictEqual(D.querySelectorAll('#add-list .titem').length, 2);
+assert.ok(D.querySelector('#add-list .titem .chip.need'), '이름 필요 표시');
+D.getElementById('add-close').click();
+assert.strictEqual(D.getElementById('add-modal').hidden, true);
 D.getElementById('ask-write').click();
 assert.ok(last('askWrite'), '세션에게 작성 맡기기');
-// 끌어다 놓기 (이름 있는 세션) → 멤버 추가
+// 끌어다 놓기도 그대로 (이름 있는 세션) → 멤버 추가
 const drop = new w.Event('drop', { bubbles: true }); drop.dataTransfer = { getData: () => 'm-id' }; drop.clientX = 100; drop.clientY = 100;
 D.getElementById('stage').dispatchEvent(drop);
 assert.strictEqual(last('addMember').name, '메인 핸들러');
 assert.ok(last('addMember').at, '놓은 위치 저장');
-// 이름 없는 세션: 눌러서 이름 붙이고 추가
-D.querySelectorAll('.titem')[0].click();
-assert.ok(D.getElementById('side').textContent.includes('이름(/rename)이 없습니다'));
+// 이름 없는 세션: 팝업에서 눌러 이름 붙이고 추가
+D.getElementById('empty-add').click();
+assert.strictEqual(D.querySelectorAll('#add-list .titem').length, 1);
+D.querySelector('#add-list .titem').click();
 D.getElementById('new-name').value = 'TTA 전문가';
-button('이름 붙이고 추가').click();
-assert.deepStrictEqual({ ...last('addMember') }, { type: 'addMember', sid: 'x-id', name: 'TTA 전문가', rename: true, at: null });
+[...D.querySelectorAll('#add-list button')].find((b) => b.textContent === '이름 붙이고 추가').click();
+const am = { ...last('addMember') };
+assert.ok(am.sid === 'x-id' && am.name === 'TTA 전문가' && am.rename === true && am.at, JSON.stringify(am));
+assert.strictEqual(D.getElementById('add-modal').hidden, true, '추가하면 팝업 닫힘');
 
 // 2) 하네스 있음: 실행 흐름
 const S0 = {
@@ -180,8 +190,18 @@ button('멤버에서 빼기').click();
 assert.strictEqual(last('removeMember').name, 'TTA 전문가');
 assert.ok(!node('TTA 전문가'));
 
+// 이벤트 창 폭: 끌어서 조절, 방향키로도
+const rz = D.getElementById('resizer');
+const side0 = parseInt(D.getElementById('side').style.width, 10);
+rz.dispatchEvent(new w.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 800 }));
+rz.dispatchEvent(new w.MouseEvent('pointermove', { bubbles: true, clientX: 700 }));
+rz.dispatchEvent(new w.MouseEvent('pointerup', { bubbles: true, clientX: 700 }));
+assert.strictEqual(parseInt(D.getElementById('side').style.width, 10), side0 + 100, '왼쪽으로 끌면 넓어짐');
+rz.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+assert.strictEqual(parseInt(D.getElementById('side').style.width, 10), side0 + 76);
+
 // 4) 텍스트는 마크업으로 해석되지 않음
 push({ ...S, members: [member('<img src=x onerror=alert(1)>')], edges: [], traffic: [] });
 assert.strictEqual(D.querySelectorAll('#nodes img').length, 0);
 
-console.log('OK — v2 panel: runners/fx toggle, event log (click=log, dblclick=settings, focus), empty/tray/drop/rename-add, flow edges (active/plan/viol/blocked), inspector, instruct, diff, design rules, main/remove, XSS-safe');
+console.log('OK — v2 panel: runners/fx toggle, event log (click=log, dblclick=settings, focus), add-session popup, resizable log, empty/drop/rename-add, flow edges (active/plan/viol/blocked), inspector, instruct, diff, design rules, main/remove, XSS-safe');
