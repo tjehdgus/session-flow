@@ -68,6 +68,5 @@ VS Code에서 `extension/` 폴더를 열고 F5로 Extension Development Host 실
 
 ## 릴리스
 
-```bash
-git tag v0.1.0 && git push origin v0.1.0
-```
+GitHub → **Releases → Draft a new release** → 태그 `vX.Y.Z` 새로 입력 → **Publish release**.
+발행하면 Actions가 `.vsix`를 빌드해 그 Release에 첨부합니다. (플러그인 업데이트를 배포할 땐 `plugin/.claude-plugin/plugin.json`의 `version`도 올리세요.)
