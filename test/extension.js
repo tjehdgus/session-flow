@@ -100,10 +100,15 @@ ext.activate(context);
   await send({ type: 'addRule', from: B, to: A });
   await send({ type: 'addRule', from: A, to: B }); // 중복 무시
   await send({ type: 'removeRule', from: B, to: A });
+  await send({ type: 'connectMain' });
+  cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  assert.strictEqual(cfg.edges.length, 4, '메인(A) ↔ B, C 왕복');
+  await send({ type: 'removeRule', from: A, to: C });
+  await send({ type: 'removeRule', from: C, to: A });
   await send({ type: 'setMain', id: B });
   await send({ type: 'setEnforce', on: true });
   cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-  assert.deepStrictEqual(cfg.edges, [{ from: A, to: B }]);
+  assert.deepStrictEqual(cfg.edges, [{ from: A, to: B }, { from: B, to: A }]);
   assert.strictEqual(cfg.members.find((m) => m.main).session, B);
   assert.strictEqual(cfg.enforce, true);
   assert.strictEqual(last().harness.enforce, true);

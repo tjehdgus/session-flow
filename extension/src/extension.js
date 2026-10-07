@@ -262,7 +262,7 @@ function activate(context) {
     const hit = groups.find((g) => ws.includes(g.folder));
     return (hit || groups[0] || {}).folder;
   }
-  const graphOptions = () => ({ showSubagents: false, windowHours: 24, ...context.globalState.get(OPT_KEY, {}) });
+  const graphOptions = () => ({ showSubagents: false, showOther: true, windowHours: 24, ...context.globalState.get(OPT_KEY, {}) });
   function postGraph() {
     if (!graphPanel) return;
     const opts = graphOptions();
@@ -280,6 +280,7 @@ function activate(context) {
       folder, names: allNames, aliases, transcripts, norm, selected,
       windowMs: opts.windowHours ? opts.windowHours * 3600 * 1000 : 0,
       showSubagents: opts.showSubagents,
+      hideOther: opts.showOther === false,
     });
     const folders = folderGroups().map((x) => ({ folder: x.folder, name: x.name, count: x.sessions.length, live: x.live }));
     graphPanel.title = `Session Flow: ${(folders.find((x) => x.folder === folder) || {}).name || ''}`;
@@ -435,6 +436,14 @@ function activate(context) {
       if (m.type === 'addRule') editHarness((c) => { if (!c.edges.some((e) => e.from === m.from && e.to === m.to)) c.edges.push({ from: m.from, to: m.to }); });
       if (m.type === 'removeRule') editHarness((c) => { c.edges = c.edges.filter((e) => !(e.from === m.from && e.to === m.to)); });
       if (m.type === 'setMain') editHarness((c) => { c.members.forEach((x) => { x.main = x.session === m.id; }); });
+      if (m.type === 'connectMain') editHarness((c) => {
+        const main = c.members.find((x) => x.main);
+        if (!main) return;
+        c.members.filter((x) => x.session !== main.session).forEach((x) => {
+          if (!c.edges.some((e) => e.from === main.session && e.to === x.session)) c.edges.push({ from: main.session, to: x.session });
+          if (!c.edges.some((e) => e.from === x.session && e.to === main.session)) c.edges.push({ from: x.session, to: main.session });
+        });
+      });
       if (m.type === 'setEnforce') editHarness((c) => { c.enforce = !!m.on; });
       if (m.type === 'ignoreNew') ignoreNew(m.folder);
       if (m.type === 'link') linkHandle(m.handle);

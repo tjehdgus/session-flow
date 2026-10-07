@@ -186,6 +186,12 @@ function handle(h) {
       break;
   }
 
+  // 이 세션 자신의 메시지 주소(소켓). 받는 쪽 기록의 uds:… 주소를 정확히 이 세션으로 연결하는 데 쓴다.
+  const selfAddr = process.env.CLAUDE_CODE_MESSAGING_SOCKET;
+  if (selfAddr && !h.agent_id) {
+    for (const o of out) if (['session_start', 'prompt', 'message_in', 'message', 'stop'].includes(o.kind)) o.self_addr = selfAddr;
+  }
+
   // ── 하네스: 역할 안내 / 차단 ──
   let response = null;
   const wantsHarness = ev === 'SessionStart' || ev === 'UserPromptSubmit' || (ev === 'PreToolUse' && tool === 'SendMessage');

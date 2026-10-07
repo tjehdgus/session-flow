@@ -59,7 +59,8 @@ function allowed(cfg, from, to) {
   if (!cfg) return null;
   const ids = new Set(cfg.members.map((m) => m.session));
   if (!ids.has(from) || !ids.has(to)) return null; // 하네스 밖은 판정하지 않음
-  return cfg.edges.some((e) => e.from === from && e.to === to);
+  if (!cfg.edges.length) return true;
+  return cfg.edges.some((e) => (e.from === from && e.to === to) || (e.from === to && e.to === from));
 }
 
 module.exports = { load, save, configPath, allowed, REL };

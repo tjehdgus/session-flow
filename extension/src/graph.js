@@ -150,6 +150,7 @@ function graphHtml() {
     <div class="controls">
       <label>작업 폴더 <select id="folder"></select></label>
       <label><input type="checkbox" id="subs"> 서브에이전트</label>
+      <label><input type="checkbox" id="others"> 기타 표시</label>
       <label>범위 <select id="win">
         <option value="3">최근 3시간</option>
         <option value="24">최근 24시간</option>
@@ -196,7 +197,9 @@ function graphHtml() {
   let connectFrom = null;     // 방향 편집: 화살표 시작 노드
   const isMember = (id) => H.members.some((m) => m.session === id);
   const memberOf = (id) => H.members.find((m) => m.session === id);
-  const hasRule = (f, t) => H.edges.some((e) => e.from === f && e.to === t);      // { key, first, last, file, edits, back, data }
+  const hasRule = (f, t) => H.edges.some((e) => e.from === f && e.to === t);
+  // 정한 방향이거나, 정한 방향에 대한 답장이면 허용 (방향을 하나도 안 정했으면 판정 안 함)
+  const okDir = (f, t) => !H.edges.length || hasRule(f, t) || hasRule(t, f);      // { key, first, last, file, edits, back, data }
   let view = { x: 0, y: 0, k: 1 };
   let firstFit = true;
 
@@ -356,7 +359,7 @@ function graphHtml() {
       const back = graph.edges.find((x) => x.from === e.to && x.to === e.from);
       side.append(el('h2', null, labelOf(e.from) + ' → ' + labelOf(e.to)));
       side.append(el('div', 'muted', e.count + '건' + (back ? ' · 반대 방향 ' + back.count + '건' : '') + ' · 마지막 ' + fmtFull(e.last)));
-      if (H.exists && isMember(e.from) && isMember(e.to) && !hasRule(e.from, e.to)) {
+      if (H.exists && isMember(e.from) && isMember(e.to) && !okDir(e.from, e.to)) {
         const w = el('div', 'warn', '하네스에서 정한 방향이 아닙니다.' + (e.blocked ? ' 이 중 ' + e.blocked + '건은 차단됐습니다.' : ''));
         side.append(w);
         const allow = el('button', '', '이 방향 허용하기'); allow.type = 'button';
@@ -518,7 +521,7 @@ function graphHtml() {
   // ── 하네스: 흐름 보기 / 방향 편집 ──
   function edgeList() {
     if (mode === 'edit') return H.edges.map((r) => ({ id: 'rule:' + r.from + '→' + r.to, from: r.from, to: r.to, count: 0, rule: true }));
-    const out = graph.edges.map((e) => ({ ...e, viol: H.exists && isMember(e.from) && isMember(e.to) && !hasRule(e.from, e.to) }));
+    const out = graph.edges.map((e) => ({ ...e, viol: H.exists && isMember(e.from) && isMember(e.to) && !okDir(e.from, e.to) }));
     const have = new Set(out.map((e) => e.from + '→' + e.to));
     // 정했지만 아직 메시지가 오가지 않은 방향은 흐린 점선
     H.edges.forEach((r) => { if (!have.has(r.from + '→' + r.to)) out.push({ id: 'plan:' + r.from + '→' + r.to, from: r.from, to: r.to, count: 0, plan: true }); });
@@ -574,9 +577,23 @@ function graphHtml() {
     side.append(el('h2', null, '방향 편집'));
     side.append(el('div', 'muted', connectFrom
       ? '"' + labelOf(connectFrom) + '"에서 보낼 대상 노드를 누르세요. 같은 노드를 다시 누르거나 Esc로 취소합니다.'
-      : '보내는 세션을 누른 다음 받는 세션을 누르면 화살표가 생깁니다. 화살표를 누르면 지울 수 있습니다. 바꾼 내용은 바로 저장되고, 각 세션에는 다음 질문부터 역할과 연락 대상이 안내됩니다.'));
+      : '보내는 세션을 누른 다음 받는 세션을 누르면 화살표가 생깁니다. 화살표를 누르면 지울 수 있습니다. 정한 방향으로 받은 메시지에 대한 답장은 반대 화살표가 없어도 허용됩니다. 바꾼 내용은 바로 저장되고, 각 세션에는 다음 질문부터 역할과 연락 대상이 안내됩니다.'));
     const main = H.members.find((m) => m.main);
     side.append(el('div', 'muted', '메인: ' + (main ? (main.name || labelOf(main.session)) : '없음 (노드를 누르고 "메인으로 지정")') + ' · 방향 ' + H.edges.length + '개'));
+    if (!H.edges.length) side.append(el('div', 'muted', '방향을 하나도 정하지 않은 동안은 제한이 없습니다. 각 세션에는 멤버와 역할만 안내되고, 차단도 동작하지 않습니다.'));
+    if (main) {
+      const others = H.members.filter((m) => m.session !== main.session);
+      const missing = others.filter((m) => !hasRule(main.session, m.session) || !hasRule(m.session, main.session));
+      if (missing.length) {
+        const b = el('button', 'primary', '메인 ↔ 모든 멤버 연결'); b.type = 'button';
+        b.addEventListener('click', () => {
+          others.forEach((m) => { if (!hasRule(main.session, m.session)) H.edges.push({ from: main.session, to: m.session }); if (!hasRule(m.session, main.session)) H.edges.push({ from: m.session, to: main.session }); });
+          vscode.postMessage({ type: 'connectMain' });
+          render();
+        });
+        side.append(b);
+      }
+    }
     side.append(el('div', 'muted', '차단: ' + (H.enforce ? '켜짐 — 정한 방향 밖으로 보내는 메시지를 막습니다.' : '꺼짐 — 안내만 하고 막지 않습니다. 상단 "차단"으로 켤 수 있습니다.')));
     side.append(el('div', 'muted', '설정 파일: ' + (H.path || '.claude/session-flow.json') + ' (git으로 공유 가능)'));
   }
@@ -771,6 +788,7 @@ function graphHtml() {
   $('newignore').addEventListener('click', () => { $('newbar').hidden = true; vscode.postMessage({ type: 'ignoreNew', folder: currentFolder }); });
   $('relayout').addEventListener('click', () => { pos = {}; layout(true); render(); fit(); vscode.postMessage({ type: 'positions', positions: pos }); });
   $('folder').addEventListener('change', (e) => { sel = null; firstFit = true; vscode.postMessage({ type: 'options', options: { folder: e.target.value } }); });
+  $('others').addEventListener('change', (e) => vscode.postMessage({ type: 'options', options: { showOther: e.target.checked } }));
   $('subs').addEventListener('change', (e) => vscode.postMessage({ type: 'options', options: { showSubagents: e.target.checked } }));
   $('win').addEventListener('change', (e) => vscode.postMessage({ type: 'options', options: { windowHours: Number(e.target.value) } }));
   window.addEventListener('resize', () => { if (firstFit) fit(); });
@@ -788,6 +806,7 @@ function graphHtml() {
       updatePickerChrome();
       pos = Object.assign({}, m.positions || {}, pos);
       $('subs').checked = !!m.options.showSubagents;
+      $('others').checked = m.options.showOther !== false;
       const fsel = $('folder');
       fsel.replaceChildren(...(m.folders || []).map((f) => {
         const o = document.createElement('option'); o.value = f.folder;

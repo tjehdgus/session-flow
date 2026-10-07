@@ -37,6 +37,17 @@ const run = (sid, o, cwd = proj) => {
   return out ? JSON.parse(out) : null;
 };
 
+// 0) 방향을 아직 안 정한 하네스: 제한 없이 안내, 차단도 안 함
+const cfg0 = harness.load(proj);
+harness.save(proj, { ...cfg0, edges: [], enforce: true });
+const r0 = run(MAIN, { hook_event_name: 'SessionStart', source: 'startup' });
+const c0 = r0.hookSpecificOutput.additionalContext;
+assert.ok(c0.includes('아직 정해지지 않았습니다'), c0);
+assert.ok(!c0.includes('직접 주고받지 말고') && !c0.includes('보내지 않습니다'), '방향 미정일 때 제한 문구 없음');
+assert.ok(c0.includes('"GNN"') && c0.includes('GNN 학습'), '멤버와 역할 안내');
+assert.strictEqual(run(GNN, { hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_use_id: 's0', tool_input: { to: 'kftc-74', message: 'x' } }), null, '방향 미정이면 차단 안 함');
+harness.save(proj, cfg0);
+
 // 1) 세션 시작: 역할 안내 (하위 폴더에서 시작해도 상위의 설정을 찾음)
 const r1 = run(GNN, { hook_event_name: 'SessionStart', source: 'resume' }, sub);
 const ctx = r1.hookSpecificOutput.additionalContext;
@@ -85,10 +96,23 @@ assert.strictEqual(run(OUT, { hook_event_name: 'PreToolUse', tool_name: 'SendMes
 const elsewhere = path.join(tmp, 'other'); fs.mkdirSync(elsewhere);
 assert.strictEqual(run(GNN, { hook_event_name: 'SessionStart', source: 'startup' }, elsewhere), null);
 
+// 답장 허용: 메인→GNN 방향만 있어도 GNN 이 메인에게 답하는 건 허용
+const cfgR = harness.load(proj);
+harness.save(proj, { ...cfgR, edges: [{ from: MAIN, to: GNN }, { from: MAIN, to: RAG }] });
+assert.strictEqual(run(GNN, { hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_use_id: 'r1', tool_input: { to: '메인 핸들러', message: '보고' } }), null, '답장 허용');
+assert.strictEqual(run(GNN, { hook_event_name: 'PreToolUse', tool_name: 'SendMessage', tool_use_id: 'r2', tool_input: { to: 'kftc-74', message: 'x' } }).hookSpecificOutput.permissionDecision, 'deny', 'GNN→RAG 는 여전히 차단');
+const cGnn = run(GNN, { hook_event_name: 'SessionStart', source: 'resume' }).hookSpecificOutput.additionalContext;
+assert.ok(cGnn.includes('받은 메시지에는 답할 수 있습니다'), cGnn);
+harness.save(proj, cfgR);
+
+// 자기 소켓 주소 기록
+execFileSync('node', [recorder], { input: JSON.stringify({ session_id: RAG, cwd: proj, hook_event_name: 'UserPromptSubmit', prompt: '주소 테스트' }), env: { ...process.env, SESSION_FLOW_DIR: dataDir, CLAUDE_CODE_MESSAGING_SOCKET: '/run/user/1002/cc-socks/777.sock' } });
+
 // 기록: 막힌 메시지는 blocked 로 남음, 안내는 harness_brief
 const events = fs.readFileSync(path.join(dataDir, 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 const blocked = events.filter((e) => e.kind === 'message' && e.blocked);
-assert.strictEqual(blocked.length, 2);
+assert.strictEqual(blocked.length, 3);
+assert.ok(events.some((e) => e.session_id === RAG && e.self_addr === '/run/user/1002/cc-socks/777.sock'), '자기 주소 기록');
 assert.ok(events.some((e) => e.kind === 'harness_brief' && e.session_id === GNN));
 
 // 설정 저장: 멤버 아닌 방향은 정리, 메인은 하나만

@@ -100,6 +100,21 @@ function buildSessions(events, now = Date.now(), roots = []) {
   return [...sessions.values()].sort((a, b) => b.end - a.end);
 }
 
+// 주소 표기 통일: '/run/.../x.sock' 과 'uds:/run/.../x.sock', '@kftc-3f' 와 'kftc-3f' 를 같게 본다
+function normAddr(h) {
+  let x = String(h || '').trim().replace(/^@/, '');
+  if (/^\//.test(x) && /\.sock$/.test(x)) x = 'uds:' + x;
+  return x;
+}
+// 관측 중 시각 t 에 해당하는 것: t 이전(1분 여유)의 가장 최근 관측, 없으면 가장 가까운 관측
+function latest(list, t) {
+  if (!list || !list.length) return null;
+  if (!t) return list.reduce((a, b) => (b.t >= a.t ? b : a));
+  const before = list.filter((x) => x.t <= t + 60 * 1000);
+  if (before.length) return before.reduce((a, b) => (b.t >= a.t ? b : a));
+  return list.reduce((a, b) => (Math.abs(b.t - t) < Math.abs(a.t - t) ? b : a));
+}
+
 // 작업 폴더별로 묶기 → [{ folder, name, sessions, live, last }]
 function groupByFolder(sessions) {
   const m = new Map();
@@ -198,32 +213,61 @@ function buildGraph(allSessions, opts = {}) {
     if (tr) for (const r of tr.received) received.push({ receiver: s.id, fromHandle: r.fromHandle, key: r.key, text: r.text });
   }
 
-  // 2) 핸들 → 세션 매핑 학습
-  const learned = {};
-  //  (a) 받은 메시지 내용이 누군가 보낸 메시지와 같으면: 보낸 대상 핸들 = 받은 세션, 보낸이 핸들 = 보낸 세션
-  for (const r of received) {
-    if (!r.key) continue;
-    const m = sent.find((x) => x.from !== r.receiver && norm(x.text) && r.key.includes(norm(x.text)));
-    r.match = m;
-    if (m) {
-      if (!learned[m.toHandle]) learned[m.toHandle] = r.receiver;
-      if (!learned[r.fromHandle]) learned[r.fromHandle] = m.from;
+  // 2) 주소(핸들) → 세션 매핑. 이름/소켓 주소는 재시작마다 바뀌고 재사용되기도 하므로
+  //    "언제 그 주소가 어느 세션이었는지" 관측을 쌓아두고, 메시지 시각 기준으로 고른다.
+  const obs = {}; // handle → [{ sid, t, src }]
+  const see = (h, sid, t, src) => {
+    if (!h || !sid) return;
+    const k = normAddr(h);
+    (obs[k] = obs[k] || []).push({ sid, t: t || 0, src });
+  };
+  //  (a) 세션이 hook 으로 남긴 자기 소켓 주소 — 가장 확실
+  for (const s of sessions) {
+    for (const e of s.events) if (e.self_addr) see(e.self_addr, s.id, e._t, 'self');
+  }
+  //  (b) ListAgents 결과에 나온 "이름 … uds:주소" 짝
+  for (const s of sessions) {
+    for (const e of s.events) {
+      if (e.kind !== 'tool' || e.tool !== 'ListAgents' || !e.detail) continue;
+      for (const line of String(e.detail).split('\n')) {
+        const u = /uds:[^\s"',)]+/.exec(line);
+        if (!u) continue;
+        const owner = latest(obs[normAddr(u[0])], e._t);
+        if (!owner) continue;
+        const nm = /(?:^|[\s"'`*|-])([A-Za-z0-9][\w.-]*-[0-9a-z]{2,8})(?=[\s"'`*|:,)]|$)/i.exec(line.replace(u[0], ''));
+        if (nm) see(nm[1], owner.sid, e._t, 'list');
+      }
     }
   }
-  //  (b) "<폴더명>-<세션ID 앞자리>" 형태 추정
+  //  (c) 받은 메시지 본문이 누군가 보낸 메시지와 같으면 (시각이 가장 가까운 것)
+  for (const r of received) {
+    if (!r.key) continue;
+    const cands = sent.filter((x) => x.from !== r.receiver && norm(x.text) && r.key.includes(norm(x.text)));
+    const m = r.t ? cands.sort((x, y) => Math.abs(r.t - x.t) - Math.abs(r.t - y.t))[0] : cands[0];
+    r.match = m;
+    if (m) {
+      see(m.toHandle, r.receiver, m.t, 'content');
+      see(r.fromHandle, m.from, r.t || m.t, 'content');
+    }
+  }
+  //  (d) "<폴더명>-<세션ID 앞자리>" 형태 추정
   const guess = (h) => {
     const mm = /^(.*?)-([0-9a-f]{2,12})$/i.exec(h);
     if (!mm) return undefined;
     const hits = sessions.filter((s) => s.id.toLowerCase().startsWith(mm[2].toLowerCase()) && (!s.cwd || s.cwd.split(/[\\/]/).pop() === mm[1]));
     return hits.length === 1 ? hits[0].id : undefined;
   };
-  const resolve = (h) => {
+  const resolve = (h, t) => {
     if (aliases[h] && byId.has(aliases[h])) return { id: aliases[h], how: 'manual' };
-    if (learned[h] && byId.has(learned[h])) return { id: learned[h], how: 'learned' };
+    const o = latest((obs[normAddr(h)] || []).filter((x) => byId.has(x.sid)), t);
+    if (o) return { id: o.sid, how: o.src };
     const g = guess(h);
     if (g) return { id: g, how: 'guess' };
     return undefined;
   };
+  // 반환·공유용: 주소별 가장 최근 세션
+  const learned = {};
+  for (const [h, list] of Object.entries(obs)) { const o = latest(list); if (o) learned[h] = o.sid; }
 
   // 3) 엣지 (방향별)
   const edgeMap = new Map();
@@ -238,7 +282,7 @@ function buildGraph(allSessions, opts = {}) {
   const ghosts = new Map();
   const sentKeys = new Set();
   for (const m of sent) {
-    const r = resolve(m.toHandle);
+    const r = resolve(m.toHandle, m.t);
     let to;
     if (r) to = r.id;
     else { to = `@${m.toHandle}`; ghosts.set(to, m.toHandle); }
@@ -248,7 +292,7 @@ function buildGraph(allSessions, opts = {}) {
   // 보낸 쪽 기록이 없는 메시지(상대 세션에 플러그인이 아직 안 붙은 경우)는 받은 쪽 기록으로 보충
   for (const r of received) {
     if (r.t === undefined) continue; // transcript 에서 읽은 건 시간이 없어 엣지로 쓰지 않음
-    const s = resolve(r.fromHandle);
+    const s = resolve(r.fromHandle, r.t);
     let from;
     if (s) from = s.id;
     else { from = `@${r.fromHandle}`; ghosts.set(from, r.fromHandle); }
@@ -356,7 +400,7 @@ function buildGraph(allSessions, opts = {}) {
       const s = sessions.find((x) => x.id === sid);
       if (s) finalNodes.push({ id: s.id, kind: 'session', label: names[s.id] || (transcripts[s.id] || {}).title || s.title, sub: '', cwd: s.cwd, live: s.live, eventCount: s.events.length, editCount: s.editCount, fileCount: s.files.size, last: s.end, changedFiles: changedFiles(s), recent: [] });
     }
-    if (otherMembers.size) {
+    if (otherMembers.size && !opts.hideOther) {
       finalNodes.push({ id: OTHER, kind: 'other', label: '기타', sub: `고르지 않은 세션 ${otherMembers.size}개`, live: false, eventCount: 0, editCount: 0, fileCount: 0, recent: [], members: [...otherMembers].map((id) => (nodes.find((x) => x.id === id) || {}).label || id) });
     }
     finalEdges = [...merged.values()];

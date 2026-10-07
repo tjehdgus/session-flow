@@ -156,6 +156,40 @@ assert.ok(sub && sub.label === 'Explore');
 assert.ok(g3.edges.find((e) => e.from === A && e.to === sub.id));
 assert.ok(g3.edges.find((e) => e.from === sub.id && e.to === A));
 
+// 주소 재사용·재시작: 같은 이름 kftc-73 이 오전엔 B, 오후엔 C. 소켓 주소는 자기 기록으로 정확히 연결
+{
+  const T = (h) => new Date(Date.UTC(2026, 9, 7, h)).toISOString();
+  const evs = [
+    { session_id: A, cwd, ts: T(1), kind: 'prompt', summary: '시작', self_addr: '/run/u/1.sock' },
+    { session_id: B, cwd, ts: T(1), kind: 'prompt', summary: 'b', self_addr: '/run/u/2.sock' },
+    { session_id: C, cwd, ts: T(5), kind: 'prompt', summary: 'c', self_addr: '/run/u/3.sock' },
+    // 오전: A → kftc-73 (B 가 받음)
+    { session_id: A, cwd, ts: T(2), kind: 'message', target: 'kftc-73', detail: '오전 지시입니다 확인 부탁', summary: '오전' },
+    { session_id: B, cwd, ts: T(2), kind: 'message_in', target: 'uds:/run/u/1.sock', detail: '오전 지시입니다 확인 부탁', summary: '오전' },
+    // 오후: A → kftc-73 (이번엔 C 가 받음)
+    { session_id: A, cwd, ts: T(6), kind: 'message', target: 'kftc-73', detail: '오후 지시는 다른 내용', summary: '오후' },
+    { session_id: C, cwd, ts: T(6), kind: 'message_in', target: 'uds:/run/u/1.sock', detail: '오후 지시는 다른 내용', summary: '오후' },
+    // 저녁: A → kftc-73, 받은 기록 없음 → 시각상 C
+    { session_id: A, cwd, ts: T(8), kind: 'message', target: 'kftc-73', detail: '저녁 지시', summary: '저녁' },
+    // C 가 재시작 후 새 소켓으로 A 에게 보냄 (보낸 쪽 기록 없음) → 자기 주소 기록으로 C
+    { session_id: C, cwd, ts: T(9), kind: 'prompt', summary: '재시작', self_addr: '/run/u/9.sock' },
+    { session_id: A, cwd, ts: T(9), kind: 'message_in', target: 'uds:/run/u/9.sock', detail: '재시작 후 보고', summary: '보고' },
+    // ListAgents 결과로 이름 학습
+    { session_id: A, cwd, ts: T(10), kind: 'tool', tool: 'ListAgents', detail: '- kftc-c4  uds:/run/u/9.sock  (idle)' },
+    { session_id: A, cwd, ts: T(11), kind: 'message', target: 'kftc-c4', detail: '리스트로 찾은 상대', summary: 'x' },
+  ];
+  const ss = buildSessions(evs, Date.parse(T(12)), [cwd]);
+  const gg = buildGraph(ss, { folder: cwd, norm, now: Date.parse(T(12)) });
+  const ed = (f, t) => gg.edges.find((e) => e.from === f && e.to === t);
+  assert.strictEqual(ed(A, B).count, 1, '오전 kftc-73 = B');
+  assert.strictEqual(ed(A, C).count, 3, '오후·저녁 kftc-73 = C, ListAgents 로 kftc-c4 = C');
+  assert.strictEqual(ed(C, A).count, 1, '새 소켓 주소도 자기 기록으로 C');
+  assert.ok(!gg.nodes.some((n) => n.kind === 'ghost'), '모르는 주소 없음');
+  // 기타 숨기기
+  const gh = buildGraph(sessions, { folder: cwd, transcripts, norm, selected: new Set([A, B]), hideOther: true });
+  assert.ok(!gh.nodes.some((n) => n.id === OTHER));
+}
+
 // webview 를 jsdom 으로 실제 렌더링 (jsdom 이 있으면)
 let JSDOM;
 try { ({ JSDOM } = require(process.env.JSDOM_PATH || 'jsdom')); } catch { /* optional */ }
@@ -235,7 +269,7 @@ if (JSDOM) {
   assert.ok(posted.some((m) => m.type === 'ignoreNew' && m.folder === cwd));
   // ── 하네스 ──
   const harnessMsg = (h, extra = {}) => ({ type: 'graph', graph: { nodes: g.nodes.filter((n) => n.kind === 'session'), edges: g.edges.filter((e) => [A, B, C].includes(e.from) && [A, B, C].includes(e.to)) }, positions: {}, options: { showSubagents: false, windowHours: 24, folder: cwd }, folders: [], picker: { needsSetup: false, newCount: 0, candidates: cands.map((c) => ({ ...c, role: c.id === B ? 'GNN 학습' : '', main: c.id === A })), handles: [] }, harness: h, ...extra });
-  const H0 = { exists: true, enforce: false, members: [{ session: A, name: '메인 핸들러', role: '총괄', main: true }, { session: B, name: 'GNN', role: 'GNN 학습' }, { session: C, name: 'RAG 및 LLM', role: '' }], edges: [{ from: A, to: B }, { from: C, to: A }], path: '.claude/session-flow.json' };
+  const H0 = { exists: true, enforce: false, members: [{ session: A, name: '메인 핸들러', role: '총괄', main: true }, { session: B, name: 'GNN', role: 'GNN 학습' }, { session: C, name: 'RAG 및 LLM', role: '' }], edges: [{ from: C, to: A }], path: '.claude/session-flow.json' };
   w.dispatchEvent(new w.MessageEvent('message', { data: harnessMsg(H0) }));
   const D = w.document;
   assert.strictEqual(D.getElementById('enf-wrap').hidden, false, '하네스가 있으면 차단 토글 표시');
@@ -255,10 +289,15 @@ if (JSDOM) {
   [...D.querySelectorAll('#side button')].find((b) => b.textContent === '이 방향 허용하기').click();
   const added = posted.filter((m) => m.type === 'addRule').pop();
   assert.ok(added && added.from === B && added.to === A);
+  // 기타 표시 토글
+  D.getElementById('others').click();
+  assert.ok(posted.some((m) => m.type === 'options' && m.options.showOther === false));
   // 방향 편집 모드
   D.getElementById('m-edit').click();
+  [...D.querySelectorAll('#side button')].find((b) => b.textContent === '메인 ↔ 모든 멤버 연결').click();
+  assert.ok(posted.some((m) => m.type === 'connectMain'));
   assert.ok(D.body.classList.contains('edit'));
-  assert.strictEqual(D.querySelectorAll('line.edge-line.rule').length, 3, '편집 모드는 정한 방향만');
+  assert.strictEqual(D.querySelectorAll('line.edge-line.rule').length, 4, '편집 모드는 정한 방향만 (메인↔전원 연결 후)');
   const click = (id) => { const e = [...D.querySelectorAll('.node')].find((x) => x.dataset.id === id); e.dispatchEvent(new w.MouseEvent('pointerdown', { bubbles: true, button: 0 })); e.dispatchEvent(new w.MouseEvent('pointerup', { bubbles: true, button: 0 })); };
   click(B);
   assert.ok([...D.querySelectorAll('.node')].find((x) => x.dataset.id === B).classList.contains('connecting'));
