@@ -85,11 +85,17 @@ class TreeProvider {
   getChildren(node) {
     if (!node) return roots().map((folder) => ({ type: 'folder', folder }));
     if (node.type === 'folder') {
+      // 하네스 멤버는 하네스 이름·역할로 보여준다 (메인 먼저, 그다음 멤버, 나머지)
       const cfg = harness.load(node.folder);
-      const members = new Set(cfg ? Object.values(harness.resolveMembers(cfg, this.model.sessions, this.model.tr)).filter(Boolean).map((s) => s.id) : []);
-      return this.model.sessions.filter((s) => s.folder === node.folder && s.activity > 0)
-        .sort((a, b) => (members.has(b.id) - members.has(a.id)) || (b.end - a.end))
-        .map((s) => ({ type: 'session', s, member: members.has(s.id) }));
+      const bySid = {};
+      if (cfg) {
+        const res = harness.resolveMembers(cfg, this.model.sessions, this.model.tr);
+        cfg.members.forEach((m, i) => { const s = res[m.name]; if (s) bySid[s.id] = { ...m, order: i }; });
+      }
+      const rank = (s) => (bySid[s.id] ? (bySid[s.id].main ? 0 : 1) : 2);
+      return this.model.sessions.filter((s) => s.folder === node.folder && (s.activity > 0 || bySid[s.id]))
+        .sort((a, b) => rank(a) - rank(b) || ((bySid[a.id] || {}).order ?? 0) - ((bySid[b.id] || {}).order ?? 0) || (b.end - a.end))
+        .map((s) => ({ type: 'session', s, member: bySid[s.id] || null, named: !!bySid[s.id] && ((this.model.tr[s.id] || {}).customTitle || '').toLowerCase() === bySid[s.id].name.toLowerCase() }));
     }
     if (node.type === 'session') return [...node.s.agents.values()].filter((a) => a.events.length).map((a) => ({ type: 'agent', s: node.s, a }));
     if (node.type === 'agent') return node.a.events.filter((e) => !['stop', 'session_start', 'session_end'].includes(e.kind)).map((e) => ({ type: 'event', s: node.s, e }));
@@ -107,10 +113,11 @@ class TreeProvider {
       return it;
     }
     if (node.type === 'session') {
-      const it = new vscode.TreeItem(node.s.displayName, vscode.TreeItemCollapsibleState.Collapsed);
-      it.description = `${node.member ? '멤버 · ' : ''}${node.s.live ? '● 작업 중 · ' : ''}${node.s.events.length} events`;
-      it.tooltip = `${node.s.cwd || ''}\n${node.s.id}`;
-      it.iconPath = new vscode.ThemeIcon(node.s.live ? 'pulse' : node.member ? 'account' : 'history');
+      const m = node.member;
+      const it = new vscode.TreeItem(m ? m.name : node.s.displayName, vscode.TreeItemCollapsibleState.Collapsed);
+      it.description = [m && m.main ? '메인' : null, m && !node.named ? '이름 필요' : null, node.s.live ? '● 작업 중' : null, m && m.role ? m.role : `${node.s.events.length} events`].filter(Boolean).join(' · ');
+      it.tooltip = [m ? `하네스 멤버 "${m.name}"${m.role ? ` — ${m.role}` : ''}` : '하네스 멤버 아님', m && !node.named ? `세션 이름(/rename)이 아직 "${m.name}"가 아닙니다. 하네스 화면에서 /rename 을 채울 수 있습니다.` : null, `세션: ${node.s.displayName}`, node.s.cwd || '', node.s.id].filter(Boolean).join('\n');
+      it.iconPath = new vscode.ThemeIcon(node.s.live ? 'pulse' : m ? (m.main ? 'star-full' : 'account') : 'history');
       it.contextValue = 'session';
       it.command = { command: 'sessionFlow.openTimeline', title: '타임라인', arguments: [node] };
       return it;
@@ -255,6 +262,15 @@ function activate(context) {
     edit((c) => { harness.renameMember(c, name, v); });
     if (sid) instruct(sid, `/rename ${v}`);
   }
+  // 하네스 이름과 /rename 이름이 다른 멤버들: 각 세션 입력창에 /rename 을 차례로 채운다
+  async function fixNames() {
+    const folder = folderNow();
+    const st = folder && harness.viewState({ folder, cfg: harness.load(folder), sessions: model.sessions, transcripts: model.tr, norm });
+    const todo = st ? st.members.filter((m) => m.sid && !m.named) : [];
+    if (!todo.length) { vscode.window.showInformationMessage('모든 멤버의 세션 이름이 하네스 이름과 같습니다.'); return; }
+    for (const m of todo) { await instruct(m.sid, `/rename ${m.name}`); await new Promise((r) => setTimeout(r, 400)); }
+    vscode.window.showInformationMessage(`${todo.length}개 세션 입력창에 /rename 을 채웠습니다. 각 세션에서 엔터를 누르면 이름이 맞춰집니다.`);
+  }
   async function askWrite() {
     const folder = folderNow();
     const cfg = folder && harness.load(folder);
@@ -299,6 +315,7 @@ function activate(context) {
         case 'openSession': openClaudeSession(m.sid); break;
         case 'instruct': instruct(m.sid, m.text); break;
         case 'askWrite': askWrite(); break;
+        case 'fixNames': fixNames(); break;
         case 'open': openEvent(m.idx); break;
         case 'diff': hp.webview.postMessage({ type: 'diffResult', key: m.key, diff: computeDiff(m.first, m.last) }); break;
         case 'openDiff': openRangeDiff(m.first, m.last); break;
@@ -343,6 +360,7 @@ function activate(context) {
     vscode.commands.registerCommand('sessionFlow.openEvent', openEvent),
     vscode.commands.registerCommand('sessionFlow.openClaude', (node) => node && node.s && openClaudeSession(node.s.id)),
     vscode.commands.registerCommand('sessionFlow.askWrite', askWrite),
+    vscode.commands.registerCommand('sessionFlow.fixNames', fixNames),
     vscode.commands.registerCommand('sessionFlow.refresh', () => model.reload()),
     vscode.commands.registerCommand('sessionFlow.openDataFolder', () => vscode.env.openExternal(vscode.Uri.file(dataDir()))),
     vscode.workspace.onDidChangeConfiguration((ev) => { if (ev.affectsConfiguration('sessionFlow.dataDir')) { watch(); model.reload(); } }),

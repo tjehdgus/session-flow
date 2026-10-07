@@ -120,6 +120,7 @@ function panelHtml() {
     <span class="stats" id="stats"></span>
     <div class="controls">
       <span class="seg" role="group" aria-label="모드"><button type="button" id="m-design" aria-pressed="false">설계</button><button type="button" id="m-flow" aria-pressed="true">실행 흐름</button></span>
+      <button type="button" id="fix-names" hidden></button>
       <button type="button" id="connect-main" hidden>메인 ↔ 전원 연결</button>
       <label id="enf-wrap" hidden><input type="checkbox" id="enforce"> 차단</label>
       <button type="button" id="fit">화면 맞춤</button>
@@ -186,6 +187,10 @@ function panelHtml() {
     $('m-flow').setAttribute('aria-pressed', String(mode === 'flow'));
     $('connect-main').hidden = !(mode === 'design' && S.members.some((m) => m.main) && S.members.length > 1);
     $('enf-wrap').hidden = !S.exists;
+    const unnamed = S.members.filter((m) => m.sid && !m.named).length;
+    $('fix-names').hidden = !unnamed;
+    $('fix-names').textContent = '이름 맞추기 (' + unnamed + ')';
+    $('fix-names').title = '하네스 이름과 세션 /rename 이름이 다른 멤버들의 입력창에 /rename 을 채웁니다';
     $('enforce').checked = !!S.enforce;
     $('title').textContent = (S.name || '') + ' 하네스';
     const live = S.members.filter((m) => m.live).length;
@@ -575,6 +580,7 @@ function panelHtml() {
     send({ type: 'connectMain' }); recalcOk(); render();
   });
   $('ask-write').addEventListener('click', () => send({ type: 'askWrite' }));
+  $('fix-names').addEventListener('click', () => send({ type: 'fixNames' }));
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && connectFrom) { connectFrom = null; render(); } });
   window.addEventListener('resize', () => { if (firstFit) fit(); });
 

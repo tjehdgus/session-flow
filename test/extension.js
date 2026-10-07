@@ -92,6 +92,7 @@ ext.activate(context);
   assert.strictEqual(s.tray.find((t) => t.sid === NONAME).name, '');
   assert.ok(!s.tray.some((t) => t.sid === OUT));
 
+  // (멤버 추가 뒤 사이드바 확인은 아래에서)
   // 멤버 추가 (이름 있는 세션)
   await send({ type: 'addMember', sid: MAIN, name: '메인 핸들러', at: { x: 0, y: 0 } });
   await send({ type: 'addMember', sid: GNN, name: 'GNN' });
@@ -112,6 +113,20 @@ ext.activate(context);
   s = state();
   const tta = s.members.find((m) => m.name === 'TTA 전문가');
   assert.ok(tta.sid === NONAME && !tta.named, '세션 ID로 연결, 이름은 아직');
+
+  // 사이드바: 멤버는 하네스 이름으로, 메인 먼저, /rename 안 된 멤버는 "이름 필요"
+  const sb = vscode._tree.getChildren(vscode._tree.getChildren()[0]);
+  assert.strictEqual(vscode._tree.getTreeItem(sb[0]).label, '메인 핸들러');
+  assert.ok(vscode._tree.getTreeItem(sb[0]).description.startsWith('메인'));
+  const ttaItem = vscode._tree.getTreeItem(sb.find((x) => x.s.id === NONAME));
+  assert.strictEqual(ttaItem.label, 'TTA 전문가', '세션 이름이 없어도 하네스 이름으로');
+  assert.ok(ttaItem.description.includes('이름 필요'));
+
+  // 이름 맞추기: /rename 안 된 멤버(TTA 전문가) 입력창 채우기
+  external.length = 0;
+  await send({ type: 'fixNames' });
+  await wait(500);
+  assert.deepStrictEqual(external, [`antigravity://anthropic.claude-code/open?session=${NONAME}&prompt=${encodeURIComponent('/rename TTA 전문가')}`]);
 
   // 역할, 메인, 방향, 전원 연결, 차단, 배치
   await send({ type: 'updateMember', name: 'GNN', role: 'GNN 학습·평가' });
