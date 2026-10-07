@@ -189,5 +189,27 @@ assert.ok(g3.edges.find((e) => e.from === sub.id && e.to === A));
   assert.ok(!gh.nodes.some((n) => n.id === OTHER));
 }
 
+// transcript: 덧붙인 부분만 이어 읽기, 4MB 경계 넘어 있는 /rename, 최신 이름이 이김
+{
+  const tp = path.join(tmp, 'big.jsonl');
+  fs.writeFileSync(tp, JSON.stringify({ type: 'custom-title', customTitle: '옛 이름' }) + '\n');
+  assert.strictEqual(scanTranscript(tp).customTitle, '옛 이름');
+  const filler = JSON.stringify({ type: 'assistant', message: { content: 'x'.repeat(1000) } }) + '\n';
+  fs.appendFileSync(tp, filler.repeat(4500)); // 약 4.5MB
+  fs.appendFileSync(tp, JSON.stringify({ type: 'custom-title', customTitle: '산출물' }) + '\n');
+  assert.strictEqual(scanTranscript(tp).customTitle, '산출물', '청크 경계 뒤의 /rename');
+  fs.appendFileSync(tp, JSON.stringify({ type: 'custom-title', customTitle: '산출물2' }));
+  assert.strictEqual(scanTranscript(tp).customTitle, '산출물2', '개행 없는 마지막 줄');
+}
+// 멤버 연결: 저장된 세션 ID가 이름이 다르고, 같은 이름의 다른 세션이 있으면 이름을 따른다
+{
+  const { resolveMembers } = require(path.join(root, 'extension/src/harness'));
+  const cfg = { members: [{ name: '산출물', session: 'old' }, { name: 'GNN', session: 'g1' }] };
+  const ss = [{ id: 'old', end: 1 }, { id: 'new', end: 2 }, { id: 'g1', end: 3 }];
+  const r = resolveMembers(cfg, ss, { old: { customTitle: '세션 3f' }, new: { customTitle: '산출물' }, g1: {} });
+  assert.strictEqual(r['산출물'].id, 'new');
+  assert.strictEqual(r['GNN'].id, 'g1', '이름 맞는 세션이 없으면 저장된 ID');
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log(`OK — nodes: ${g.nodes.map((n) => n.label).join(', ')} | edges: ${g.edges.map((e) => `${label(e.from)}→${label(e.to)}(${e.count})`).join(', ')}`);
+console.log(`OK — transcript incremental + name-first resolve · nodes: ${g.nodes.map((n) => n.label).join(', ')} | edges: ${g.edges.map((e) => `${label(e.from)}→${label(e.to)}(${e.count})`).join(', ')}`);

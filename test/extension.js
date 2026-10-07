@@ -152,6 +152,11 @@ ext.activate(context);
   await wait(500);
   assert.deepStrictEqual(external, [`antigravity://anthropic.claude-code/open?session=${NONAME}&prompt=${encodeURIComponent('/rename TTA 전문가')}`]);
 
+  // 세션에서 /rename 하면(훅 이벤트 없음) 몇 초 안에 "이름 필요"가 사라짐
+  fs.appendFileSync(TP[NONAME], JSON.stringify({ type: 'custom-title', customTitle: 'TTA 전문가', sessionId: NONAME }) + '\n');
+  await wait(5300);
+  assert.ok(state().members.find((m) => m.name === 'TTA 전문가').named, '/rename 반영');
+
   // 역할, 메인, 방향, 전원 연결, 차단, 배치
   await send({ type: 'updateMember', name: 'GNN', role: 'GNN 학습·평가' });
   await send({ type: 'addRule', from: 'GNN', to: 'RAG 및 LLM' });

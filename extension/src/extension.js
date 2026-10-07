@@ -61,6 +61,17 @@ class Model {
     }
     this._emitter.fire();
   }
+  // /rename 은 훅 이벤트를 남기지 않으므로 transcript 의 이름만 주기적으로 다시 확인한다
+  refreshTitles() {
+    const before = JSON.stringify(Object.fromEntries(Object.entries(this.tr).map(([k, v]) => [k, v.customTitle || ''])));
+    const tr = this.transcripts();
+    const after = JSON.stringify(Object.fromEntries(Object.entries(tr).map(([k, v]) => [k, v.customTitle || ''])));
+    if (before === after) return false;
+    this.tr = tr;
+    for (const s of this.sessions) { const t = tr[s.id] || {}; s.displayName = t.customTitle || t.title || s.title; }
+    this._emitter.fire();
+    return true;
+  }
   find(id) { return this.sessions.find((s) => s.id === id); }
   transcripts() {
     const out = {};
@@ -378,6 +389,8 @@ function activate(context) {
   }
   watch();
   model.reload();
+  const titleTimer = setInterval(() => { try { model.refreshTitles(); } catch { /* ignore */ } }, 5000);
+  if (titleTimer.unref) titleTimer.unref();
 
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('sessionFlow.sessions', tree),
@@ -395,7 +408,7 @@ function activate(context) {
     vscode.workspace.onDidChangeConfiguration((ev) => { if (ev.affectsConfiguration('sessionFlow.dataDir')) { watch(); model.reload(); } }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => { watch(); model.reload(); }),
     status,
-    { dispose: () => { for (const f of watched) fs.unwatchFile(f); } },
+    { dispose: () => { clearInterval(titleTimer); for (const f of watched) fs.unwatchFile(f); } },
   );
 }
 

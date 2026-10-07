@@ -64,16 +64,15 @@ function renameMember(cfg, from, to) {
 const allowedDir = (cfg, f, t) => !cfg.edges.length
   || cfg.edges.some((e) => (key(e.from) === key(f) && key(e.to) === key(t)) || (key(e.from) === key(t) && key(e.to) === key(f)));
 
-// 멤버 → 세션: 설정에 적힌 세션 ID, 아니면 /rename 이름이 같은 세션 중 가장 최근
+// 멤버 → 세션: /rename 이름이 멤버 이름과 같은 세션이 있으면 그중 가장 최근 것(이름이 곧 주소),
+// 없으면 설정에 적힌 세션 ID. 세션을 다시 열어 ID가 바뀌어도 이름으로 따라간다.
 function resolveMembers(cfg, sessions, transcripts) {
   const map = {};
+  const named = (x) => key((transcripts[x.id] || {}).customTitle);
   for (const m of cfg.members) {
-    let s = m.session ? sessions.find((x) => x.id === m.session) : null;
-    if (!s) {
-      const hits = sessions.filter((x) => key((transcripts[x.id] || {}).customTitle) === key(m.name));
-      s = hits.sort((a, b) => b.end - a.end)[0] || null;
-    }
-    map[m.name] = s;
+    const byId = m.session ? sessions.find((x) => x.id === m.session) : null;
+    const hits = sessions.filter((x) => named(x) === key(m.name)).sort((a, b) => b.end - a.end);
+    map[m.name] = (byId && named(byId) === key(m.name)) ? byId : (hits[0] || byId || null);
   }
   return map;
 }
