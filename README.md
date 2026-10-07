@@ -73,27 +73,67 @@ Claude Code ──hook──▶ ~/.session-flow/   (활동 기록, 파일 전/�
 
 ## 설치
 
-**요구사항**: Node.js (hook 실행용)
+**요구사항**: Node.js (Claude Code가 있으면 이미 있음)
 
-1. Claude Code 플러그인 (세션을 실행하는 머신에서. 원격 SSH면 원격 서버에서)
-   ```bash
-   claude plugin marketplace add tjehdgus/session-flow
-   claude plugin install session-flow@session-flow
-   ```
-2. 확장: [Releases](https://github.com/tjehdgus/session-flow/releases)의 `session-flow.vsix`, 또는 직접 빌드
-   ```bash
-   git clone https://github.com/tjehdgus/session-flow && cd session-flow/extension
-   npx --yes @vscode/vsce package --no-dependencies -o session-flow.vsix
-   ```
-   확장 패널 `···` → **Install from VSIX**. 그 뒤 창 새로고침, 열려 있던 세션은 다시 열기.
+원격 SSH로 작업한다면 아래는 전부 **원격 서버(세션이 도는 곳)** 에서 합니다.
+
+### 1. Claude Code 플러그인
+
+```bash
+claude plugin marketplace add tjehdgus/session-flow
+claude plugin install session-flow@session-flow
+```
+
+플러그인은 세션이 **시작될 때** 읽힙니다. 이미 열려 있던 Claude Code 세션은 한 번 닫았다가 다시 열어야 기록이 시작됩니다.
+
+### 2. IDE 확장 (VS Code · Antigravity)
+
+**① 확장 파일(.vsix) 만들기**: 터미널에서
+
+```bash
+git clone https://github.com/tjehdgus/session-flow ~/session-flow
+cd ~/session-flow/extension
+npx --yes @vscode/vsce package --no-dependencies -o session-flow.vsix
+```
+
+`~/session-flow/extension/session-flow.vsix` 파일이 생깁니다. ([Releases](https://github.com/tjehdgus/session-flow/releases)에 올라온 `.vsix`를 받아도 됩니다.)
+
+**② IDE에 설치하기**: 메뉴를 찾기보다 명령 팔레트가 가장 빠릅니다.
+
+1. `Ctrl+Shift+P` (Mac은 `Cmd+Shift+P`)
+2. `vsix` 입력 → **Extensions: Install from VSIX...** 선택
+3. 파일 선택 창에서 `session-flow/extension/session-flow.vsix` 선택
+   - 원격 SSH면 이 창에 **서버의 파일**이 보입니다. 홈 폴더(`/home/<사용자>`)에서 찾아가면 됩니다.
+4. 오른쪽 아래에 설치 완료 알림이 뜹니다.
+
+> 메뉴로 하려면: 왼쪽 세로 막대의 **확장 아이콘**(네모 4개) → 확장 패널 맨 위 오른쪽 **`···`** → **Install from VSIX...**
+
+**③ 창 새로고침**
+
+1. `Ctrl+Shift+P`
+2. `reload` 입력 → **Developer: Reload Window** 선택
+
+새로고침하면 왼쪽 세로 막대에 **Session Flow 아이콘**이 생깁니다. 새로고침 뒤 Claude Code 패널이 닫혔다면 Claude Code에서 이전 대화를 다시 열면 됩니다(대화 내용은 그대로입니다).
 
 ## 업데이트
+
+**확장** (화면이 바뀌는 업데이트):
+
+```bash
+cd ~/session-flow && git pull
+cd extension && npx --yes @vscode/vsce package --no-dependencies -o session-flow.vsix
+```
+
+그다음 위 **②**(Install from VSIX)와 **③**(Reload Window)을 그대로 반복합니다. 하네스 설정(`.claude/session-flow.json`)과 기록은 그대로 남습니다.
+
+**플러그인** (기록·차단 동작이 바뀌는 업데이트, 릴리스 노트에 적혀 있을 때만):
 
 ```bash
 claude plugin marketplace update session-flow
 claude plugin update session-flow@session-flow
 ```
-확장은 새 `.vsix`를 다시 설치하고 창을 새로고침합니다.
+
+플러그인을 업데이트했으면 열려 있던 Claude Code 세션을 닫았다가 다시 열어야 새 버전이 적용됩니다.
 
 ## 기록되는 것 (`~/.session-flow`)
 
