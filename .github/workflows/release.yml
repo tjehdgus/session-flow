@@ -17,7 +17,7 @@ jobs:
         with:
           node-version: 20
       - name: Test
-        run: node test/smoke.js && node test/store.js && node test/harness.js && node test/extension.js && node test/panel.js
+        run: node test/smoke.js && node test/store.js && node test/harness.js && node test/extension.js && node test/panel.js && node test/timeline.js
       - name: Package .vsix
         working-directory: extension
         run: npx --yes @vscode/vsce package --no-dependencies -o ../session-flow.vsix

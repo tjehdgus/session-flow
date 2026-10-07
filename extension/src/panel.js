@@ -400,7 +400,7 @@ function panelHtml() {
         r.addEventListener('click', () => (e.hasDiff ? showDiff({ first: e.idx, last: e.idx, file: e.file, edits: 1 }) : send({ type: 'open', idx: e.idx })));
         side.append(r);
       });
-      side.append(btn('타임라인 열기', 'link', () => send({ type: 'openTimeline', sid: m.sid })));
+      side.append(btn('기록 열기', 'link', () => send({ type: 'openTimeline', sid: m.sid })));
     }
   }
 

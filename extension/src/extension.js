@@ -6,7 +6,7 @@ const vscode = require('vscode');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { readEvents, buildSessions, sessionView } = require('./store');
+const { readEvents, buildSessions, sessionTurns } = require('./store');
 const { timelineHtml } = require('./timeline');
 const { panelHtml } = require('./panel');
 const { scanTranscript, norm } = require('./transcripts');
@@ -119,7 +119,7 @@ class TreeProvider {
       it.tooltip = [m ? `하네스 멤버 "${m.name}"${m.role ? ` — ${m.role}` : ''}` : '하네스 멤버 아님', m && !node.named ? `세션 이름(/rename)이 아직 "${m.name}"가 아닙니다. 하네스 화면에서 /rename 을 채울 수 있습니다.` : null, `세션: ${node.s.displayName}`, node.s.cwd || '', node.s.id].filter(Boolean).join('\n');
       it.iconPath = new vscode.ThemeIcon(node.s.live ? 'pulse' : m ? (m.main ? 'star-full' : 'account') : 'history');
       it.contextValue = 'session';
-      it.command = { command: 'sessionFlow.openTimeline', title: '타임라인', arguments: [node] };
+      it.command = { command: 'sessionFlow.openTimeline', title: '기록', arguments: [node] };
       return it;
     }
     if (node.type === 'agent') {
@@ -215,13 +215,24 @@ function activate(context) {
   function postTimeline() {
     if (!tl) return;
     const s = model.find(tlSid) || model.sessions[0];
-    tl.webview.postMessage({ type: 'session', session: s ? { ...sessionView(s), title: s.displayName } : null, sessions: model.sessions.map((x) => ({ id: x.id, title: x.displayName, live: x.live })) });
+    // 하네스 멤버면 하네스 이름·역할로 보여준다
+    const folder = s && s.folder;
+    const cfg = folder && harness.load(folder);
+    const res = cfg ? harness.resolveMembers(cfg, model.sessions, model.tr) : {};
+    const memberOf = (sid) => cfg && cfg.members.find((m) => res[m.name] && res[m.name].id === sid);
+    const nameOf = (x) => { const m = memberOf(x.id); return m ? m.name : x.displayName; };
+    const me = s && memberOf(s.id);
+    tl.webview.postMessage({
+      type: 'session',
+      session: s ? { id: s.id, title: nameOf(s), role: me ? me.role : '', live: s.live, eventCount: s.events.length, fileCount: s.files.size, turns: sessionTurns(s) } : null,
+      sessions: model.sessions.filter((x) => x.activity > 0).map((x) => ({ id: x.id, title: nameOf(x), live: x.live })),
+    });
   }
   function openTimeline(arg) {
     const sid = typeof arg === 'string' ? arg : arg && arg.s ? arg.s.id : null;
     if (sid) tlSid = sid; else if (!tlSid && model.sessions[0]) tlSid = model.sessions[0].id;
     if (tl) { tl.reveal(); postTimeline(); return; }
-    tl = vscode.window.createWebviewPanel('sessionFlow.timeline', 'Session Flow 타임라인', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
+    tl = vscode.window.createWebviewPanel('sessionFlow.timeline', 'Session Flow 기록', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
     tl.webview.html = timelineHtml(tl.webview);
     tl.onDidDispose(() => { tl = undefined; });
     tl.webview.onDidReceiveMessage((m) => {

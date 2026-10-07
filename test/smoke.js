@@ -8,7 +8,7 @@ const assert = require('assert');
 
 const root = path.resolve(__dirname, '..');
 const recorder = path.join(root, 'plugin/scripts/record.js');
-const { readEvents, buildSessions, sessionView } = require(path.join(root, 'extension/src/store'));
+const { readEvents, buildSessions, sessionView, sessionTurns } = require(path.join(root, 'extension/src/store'));
 const { timelineHtml } = require(path.join(root, 'extension/src/timeline'));
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'session-flow-'));
@@ -72,6 +72,11 @@ assert.strictEqual(view.lanes[1].events.length, 3);
 assert.ok(view.lanes[0].events.find((e) => e.kind === 'delegate').detail.includes('similarity_search'));
 assert.strictEqual(view.lanes[0].events.find((e) => e.kind === 'tool' && e.tool === 'Agent').detail, 'retriever.py 2번째 줄');
 assert.ok(JSON.stringify(view));
+const turns = sessionTurns(s);
+assert.strictEqual(turns[0].trigger.kind, 'prompt');
+assert.strictEqual(turns[0].trigger.text, 'retriever에 top-k 추가해줘');
+assert.ok(turns[0].stats.edits >= 1 && turns[0].stats.delegates >= 1);
+assert.ok(JSON.stringify(turns));
 
 // webview 스크립트 문법 확인
 const html = timelineHtml({});

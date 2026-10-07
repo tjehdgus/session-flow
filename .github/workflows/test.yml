@@ -17,4 +17,4 @@ jobs:
       - run: node test/store.js
       - run: node test/harness.js
       - run: node test/extension.js
-      - run: npm i --no-save jsdom@24 && node test/panel.js
+      - run: npm i --no-save jsdom@24 && node test/panel.js && node test/timeline.js

@@ -128,6 +128,40 @@ function groupByFolder(sessions) {
   return [...m.values()].sort((a, b) => b.last - a.last);
 }
 
+// 세션 기록을 "턴" 단위로: 사람의 질문 또는 다른 세션에서 받은 메시지 하나 = 턴 하나.
+// 그 턴 동안 한 일(툴, 파일 수정, 보낸 메시지, 서브에이전트)을 묶는다. 최신 턴이 앞.
+function sessionTurns(s, limit = 200) {
+  const cut = (x, n = 240) => (x == null ? '' : String(x).length > n ? String(x).slice(0, n) + '…' : String(x));
+  const turns = [];
+  let cur = null;
+  const open = (trigger, e) => {
+    cur = { trigger, ts: e ? e.ts : null, items: [], stats: { tools: 0, bash: 0, edits: 0, files: new Set(), out: 0, delegates: 0, errors: 0, blocked: 0 } };
+    turns.push(cur);
+  };
+  for (const e of s.events) {
+    if (QUIET_KINDS.has(e.kind)) continue;
+    if (!e.agent_id && (e.kind === 'prompt' || e.kind === 'message_in')) {
+      open({ kind: e.kind, text: cut(e.detail || e.summary, 600), from: e.kind === 'message_in' ? e.target : null, idx: e._idx }, e);
+      continue;
+    }
+    if (!cur) open({ kind: 'start', text: '' }, e);
+    const isEdit = e.kind === 'tool' && !!(e.has_after || e.has_before);
+    cur.items.push({
+      idx: e._idx, ts: e.ts, kind: e.kind, tool: e.tool, agent: e.agent_type || null, sub: !!e.agent_id,
+      file: e.file || null, target: e.target || null, summary: cut(e.summary), detail: cut(e.detail, 1200),
+      hasDiff: isEdit, blocked: !!e.blocked,
+    });
+    const st = cur.stats;
+    if (e.kind === 'tool' || e.kind === 'tool_error') st.tools += 1;
+    if (e.tool === 'Bash') st.bash += 1;
+    if (isEdit) { st.edits += 1; st.files.add(e.file); }
+    if (e.kind === 'message') { st.out += 1; if (e.blocked) st.blocked += 1; }
+    if (e.kind === 'delegate') st.delegates += 1;
+    if (e.kind === 'tool_error') st.errors += 1;
+  }
+  return turns.slice(-limit).reverse().map((t) => ({ ...t, stats: { ...t.stats, files: [...t.stats.files] }, end: t.items.length ? t.items[t.items.length - 1].ts : t.ts }));
+}
+
 // Webview 로 넘길 직렬화 가능한 형태
 function sessionView(s) {
   const span = Math.max(1, s.end - s.start);
@@ -447,4 +481,4 @@ function pickCandidates(allSessions, folder, { names = {}, transcripts = {}, sel
     .sort((a, b) => b.last - a.last);
 }
 
-module.exports = { readEvents, buildSessions, sessionView, buildGraph, groupByFolder, parseIncoming, folderOf, changedFiles, pickCandidates, OTHER };
+module.exports = { readEvents, buildSessions, sessionView, sessionTurns, buildGraph, groupByFolder, parseIncoming, folderOf, changedFiles, pickCandidates, OTHER };

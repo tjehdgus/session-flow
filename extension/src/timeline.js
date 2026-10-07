@@ -1,5 +1,7 @@
 'use strict';
-// 타임라인 Webview HTML. 데이터는 postMessage 로 받고, DOM API(textContent)로만 렌더링한다.
+// 세션 활동 기록: "턴" 단위 세로 목록 (최신이 위).
+// 턴 = 사람의 질문 또는 다른 세션에서 받은 메시지 하나와, 그동안 한 일.
+// 데이터는 postMessage 로 받고, 텍스트는 textContent 로만 넣는다.
 
 function nonce() {
   let s = '';
@@ -8,7 +10,7 @@ function nonce() {
   return s;
 }
 
-function timelineHtml(webview) {
+function timelineHtml() {
   const n = nonce();
   return `<!doctype html>
 <html lang="ko">
@@ -16,193 +18,159 @@ function timelineHtml(webview) {
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${n}'; script-src 'nonce-${n}';">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Session Flow</title>
+<title>Session Flow 기록</title>
 <style nonce="${n}">
+  :root { --accent:#5B9DFF; --edit:#E8A15A; --msg:#B48CF2; --err:#F2797B; --line: var(--vscode-panel-border, rgba(127,127,127,.25)); --soft: rgba(127,127,127,.09); }
+  * { box-sizing:border-box; }
   [hidden] { display:none !important; }
-  :root { --edit:#F0A35E; --bash:#5B9DFF; --msg:#B48CF2; --err:#F26D6D; }
-  body { margin:0; padding:16px 20px; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
-  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:16px; }
-  h1 { font-size:15px; margin:0; display:flex; align-items:center; gap:8px; }
-  .live { font-size:11px; padding:2px 8px; border-radius:999px; background: rgba(80,200,120,.15); color:#6FD69A; }
-  .live::before { content:'●'; margin-right:4px; animation: blink 1.2s infinite; }
-  @keyframes blink { 50% { opacity:.3 } }
-  .stats { font-family: var(--vscode-editor-font-family); font-size:12px; opacity:.8; display:flex; gap:16px; }
-  select { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border:1px solid var(--vscode-dropdown-border); padding:4px 6px; }
-  .meta { font-family: var(--vscode-editor-font-family); font-size:11px; opacity:.7; margin-top:2px; }
-  .legend { display:flex; gap:14px; font-size:11px; opacity:.85; margin: 4px 0 12px; flex-wrap:wrap; }
-  .legend span::before { content:''; display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:-1px; background: var(--c); }
-  .lg-edit { --c:var(--edit) } .lg-bash { --c:var(--bash) } .lg-msg { --c:var(--msg) } .lg-read { --c:rgba(127,127,127,.6) } .lg-err { --c:var(--err) }
-  .actions { display:flex; gap:6px; }
-  .scroll { overflow-x:auto; }
-  .lanes { min-width:760px; display:flex; flex-direction:column; gap:8px; }
-  .lane { display:flex; align-items:center; gap:12px; }
-  .lane-name { width:150px; flex-shrink:0; }
-  .lane-name b { font-size:12px; display:block; }
-  .lane-name small { font-family: var(--vscode-editor-font-family); font-size:10px; opacity:.6; }
-  .lane.sub .lane-name { padding-left:14px; }
-  .track { position:relative; flex:1; height:52px; border-radius:8px; background: var(--vscode-sideBar-background, rgba(127,127,127,.06)); border:1px solid var(--vscode-panel-border, rgba(127,127,127,.2)); }
-  .bar { position:absolute; top:25px; height:2px; background: rgba(127,127,127,.35); }
-  .chip { position:absolute; top:7px; height:36px; min-width:36px; max-width:180px; padding:0 8px; border-radius:7px; cursor:pointer; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; overflow:hidden; font: inherit; font-size:10px; border:1.5px solid var(--c); background: var(--bg); color: var(--fg); transform: translateX(-4px); }
-  .chip b { font-family: var(--vscode-editor-font-family); font-size:10px; }
-  .chip span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; opacity:.85; }
-  .chip:hover, .chip:focus-visible { z-index:5; outline:2px solid var(--vscode-focusBorder); outline-offset:1px; }
-  .chip.sel { outline:2px solid var(--vscode-foreground); outline-offset:2px; z-index:6; }
-  .chip.newest { animation: pulse 1.6s 3; }
-  @keyframes pulse { 0% { box-shadow:0 0 0 0 rgba(91,157,255,.6) } 100% { box-shadow:0 0 0 10px rgba(91,157,255,0) } }
-  .detail { margin-top:18px; border:1px solid var(--vscode-panel-border, rgba(127,127,127,.2)); border-radius:8px; overflow:hidden; }
-  .detail-head { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; padding:8px 12px; border-bottom:1px solid var(--vscode-panel-border, rgba(127,127,127,.2)); font-size:12px; }
-  .detail-head button { font: inherit; font-size:11px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border:0; border-radius:4px; padding:4px 10px; cursor:pointer; }
-  .detail-head button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
-  pre { margin:0; padding:12px; font-family: var(--vscode-editor-font-family); font-size:12px; white-space:pre-wrap; word-break:break-word; max-height:320px; overflow:auto; }
+  body { margin:0; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
+  header { position:sticky; top:0; z-index:2; display:flex; flex-direction:column; gap:8px; padding:12px 18px; background: var(--vscode-editor-background); border-bottom:1px solid var(--line); }
+  .top { display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; }
+  h1 { font-size:15px; margin:0; }
+  .meta { font-size:12px; opacity:.72; }
+  .live { font-size:11px; padding:1px 8px; border-radius:999px; background: rgba(111,214,154,.18); }
+  select { margin-left:auto; font: inherit; font-size:12px; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border:1px solid var(--vscode-dropdown-border, transparent); padding:3px 6px; max-width:260px; }
+  .filters { display:flex; flex-wrap:wrap; gap:6px; }
+  .filters button { font: inherit; font-size:12px; border:1px solid var(--line); border-radius:999px; padding:3px 11px; background:transparent; color: var(--vscode-foreground); cursor:pointer; }
+  .filters button[aria-pressed=true] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
+  button:focus-visible, select:focus-visible { outline:2px solid var(--vscode-focusBorder); outline-offset:1px; }
+  main { padding:12px 18px 40px; display:flex; flex-direction:column; gap:10px; max-width:980px; }
+  .turn { border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .turn.in { border-left:3px solid var(--msg); }
+  .th { all:unset; display:grid; grid-template-columns: 52px minmax(0,1fr) auto; gap:4px 12px; align-items:start; width:100%; padding:10px 14px; cursor:pointer; box-sizing:border-box; }
+  .th:hover, .th:focus-visible { background: var(--soft); }
+  .tm { font-family: var(--vscode-editor-font-family); font-size:11px; opacity:.65; padding-top:2px; }
+  .tq { display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .tq .who { font-size:11px; opacity:.75; }
+  .tq .txt { font-size:13px; line-height:1.5; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .turn.open .tq .txt { -webkit-line-clamp: unset; display:block; }
+  .chips { display:flex; flex-wrap:wrap; gap:5px; justify-content:flex-end; max-width:320px; }
+  .chip { font-size:10.5px; padding:2px 8px; border-radius:999px; background: var(--soft); white-space:nowrap; }
+  .chip.edit { background: rgba(232,161,90,.2); } .chip.msg { background: rgba(180,140,242,.2); } .chip.err { background: rgba(242,121,123,.22); }
+  .tb { border-top:1px solid var(--line); padding:6px 0; }
+  .it { all:unset; display:grid; grid-template-columns: 52px 76px minmax(0,1fr); gap:10px; align-items:baseline; width:100%; box-sizing:border-box; padding:4px 14px; font-size:12px; cursor:pointer; }
+  .it:hover, .it:focus-visible { background: var(--soft); }
+  .it .k { font-family: var(--vscode-editor-font-family); font-size:11px; font-weight:600; }
+  .it .v { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .it.sub { padding-left:28px; opacity:.85; }
+  .it.edit .k { color: var(--edit); } .it.msg .k { color: var(--msg); } .it.err .k { color: var(--err); }
+  .det { margin:2px 14px 8px 152px; padding:8px 10px; border-radius:8px; background: var(--soft); font-family: var(--vscode-editor-font-family); font-size:11.5px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:260px; overflow:auto; }
+  .more { font-size:12px; opacity:.7; padding:4px 14px 8px; }
   .empty { opacity:.7; padding:40px 0; text-align:center; line-height:1.8; }
 </style>
 </head>
 <body>
 <header>
-  <div>
-    <h1><span id="title">Session Flow</span><span id="live" class="live" hidden>LIVE</span></h1>
-    <div class="meta" id="meta"></div>
+  <div class="top"><h1 id="title">기록</h1><span class="live" id="live" hidden>● 작업 중</span><span class="meta" id="meta"></span><select id="picker" aria-label="세션"></select></div>
+  <div class="filters" role="group" aria-label="필터">
+    <button type="button" data-f="all" aria-pressed="true">전체</button>
+    <button type="button" data-f="edit" aria-pressed="false">파일 수정</button>
+    <button type="button" data-f="msg" aria-pressed="false">메시지</button>
+    <button type="button" data-f="bash" aria-pressed="false">명령</button>
+    <button type="button" data-f="err" aria-pressed="false">실패</button>
   </div>
-  <div class="stats" id="stats"></div>
-  <label>세션 <select id="picker"></select></label>
 </header>
-<div class="legend">
-  <span class="lg-edit">Edit / Write</span>
-  <span class="lg-bash">Bash</span>
-  <span class="lg-msg">위임 / 메시지</span>
-  <span class="lg-read">Read / Search</span>
-  <span class="lg-err">실패</span>
-</div>
-<div class="scroll"><div class="lanes" id="lanes"></div></div>
-<div class="detail" id="detail" hidden>
-  <div class="detail-head"><b id="d-title"></b><div class="actions"><button id="d-file" class="secondary" hidden>파일 열기</button><button id="d-open">열기</button></div></div>
-  <pre id="d-body"></pre>
-</div>
-<div class="empty" id="empty" hidden>아직 기록된 세션이 없습니다.<br>Claude Code에 session-flow 플러그인을 설치하고 세션을 시작하세요.</div>
+<main id="list"></main>
 
 <script nonce="${n}">
 (function () {
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
-  let current = null;
-  let selected = null;
-  let lastMaxIdx = -1;
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const fmt = (ts) => { const d = new Date(ts); return isNaN(d) ? '' : d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' }); };
+  const day = (ts) => { const d = new Date(ts); return isNaN(d) ? '' : d.toLocaleDateString([], { month: 'numeric', day: 'numeric' }); };
+  let data = null, filter = 'all';
+  const opened = new Set(); const shown = new Set();
+  const base = (p) => String(p || '').split(/[\\\\/]/).pop();
 
-  const style = {
-    edit:  { c: 'var(--edit)', bg: 'var(--edit)', fg: '#111' },
-    bash:  { c: 'var(--bash)', bg: 'var(--bash)', fg: '#111' },
-    msg:   { c: 'var(--msg)',  bg: 'var(--msg)',  fg: '#111' },
-    err:   { c: 'var(--err)',  bg: 'transparent', fg: 'var(--vscode-foreground)' },
-    read:  { c: 'rgba(127,127,127,.6)', bg: 'transparent', fg: 'var(--vscode-foreground)' },
-  };
-  function classify(e) {
-    if (e.kind === 'tool_error') return 'err';
-    if (e.kind === 'delegate' || e.kind === 'message' || e.kind === 'subagent_stop' || e.kind === 'subagent_start' || e.kind === 'prompt') return 'msg';
-    if (e.hasDiff) return 'edit';
-    if (e.tool === 'Bash') return 'bash';
-    return 'read';
-  }
-  function label(e) {
-    switch (e.kind) {
-      case 'prompt': return ['Prompt', e.summary || ''];
-      case 'delegate': return ['→ ' + (e.target || 'agent'), e.summary || ''];
-      case 'message': return ['✉ ' + (e.target || ''), e.summary || ''];
-      case 'subagent_start': return ['Start', e.summary || ''];
-      case 'subagent_stop': return ['← 결과', ''];
-      default: return [e.tool || e.kind, e.file ? e.file.split(/[\\\\/]/).pop() : (e.summary || '')];
+  const kindOf = (it) => it.hasDiff ? 'edit' : (it.kind === 'message' || it.kind === 'message_in' || it.kind === 'delegate' || it.kind === 'subagent_stop') ? 'msg' : it.kind === 'tool_error' ? 'err' : it.tool === 'Bash' ? 'bash' : 'other';
+  const label = (it) => {
+    switch (it.kind) {
+      case 'message': return ['보냄', '→ ' + (it.target || '') + ': ' + it.summary + (it.blocked ? ' (차단됨)' : '')];
+      case 'delegate': return ['위임', '→ ' + (it.target || '') + ': ' + it.summary];
+      case 'subagent_start': return ['시작', it.summary];
+      case 'subagent_stop': return ['결과', it.agent ? it.agent + ' 완료' : '완료'];
+      case 'tool_error': return [it.tool + ' ✕', it.summary];
+      default: return [it.tool || it.kind, it.file ? (it.hasDiff ? '± ' : '') + base(it.file) : it.summary];
     }
-  }
-  function fmt(ts) { const d = new Date(ts); return isNaN(d) ? '' : d.toLocaleTimeString([], { hour12: false }); }
+  };
+  const keep = (t) => filter === 'all' || t.items.some((it) => kindOf(it) === filter);
 
   function render() {
-    const s = current;
-    $('empty').hidden = !!s;
-    $('lanes').replaceChildren();
-    if (!s) { $('detail').hidden = true; return; }
-    $('title').textContent = s.title;
-    $('live').hidden = !s.live;
-    $('meta').textContent = s.cwd + ' · ' + fmt(s.start) + ' – ' + fmt(s.end);
-    $('stats').replaceChildren(
-      ...[[s.lanes.length, 'agents'], [s.eventCount, 'events'], [s.fileCount, 'files changed']].map(([v, k]) => {
-        const d = document.createElement('div'); const b = document.createElement('b');
-        b.textContent = v; d.append(b, ' ' + k); return d;
-      })
-    );
-    let maxIdx = -1;
-    s.lanes.forEach((ln) => ln.events.forEach((e) => { maxIdx = Math.max(maxIdx, e.idx); }));
-
-    for (const ln of s.lanes) {
-      const lane = document.createElement('div');
-      lane.className = 'lane' + (ln.isMain ? '' : ' sub');
-      const nm = document.createElement('div'); nm.className = 'lane-name';
-      const b = document.createElement('b'); b.textContent = ln.isMain ? 'Main' : '↳ ' + ln.type;
-      const sm = document.createElement('small'); sm.textContent = ln.isMain ? 'session' : 'subagent';
-      nm.append(b, sm);
-      const track = document.createElement('div'); track.className = 'track';
-      const bar = document.createElement('div'); bar.className = 'bar';
-      bar.style.left = (ln.from * 0.94 + 1) + '%';
-      bar.style.width = Math.max(1, (ln.to - ln.from) * 0.94) + '%';
-      track.append(bar);
-      for (const e of ln.events) {
-        const st = style[classify(e)];
-        const [head, sub] = label(e);
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'chip' + (selected === e.idx ? ' sel' : '') + (e.idx === maxIdx && e.idx > lastMaxIdx && lastMaxIdx >= 0 ? ' newest' : '');
-        btn.style.left = (e.pos * 0.94 + 1) + '%';
-        btn.style.setProperty('--c', st.c); btn.style.setProperty('--bg', st.bg); btn.style.setProperty('--fg', st.fg);
-        btn.title = head + ' ' + sub + ' · ' + fmt(e.ts);
-        const hb = document.createElement('b'); hb.textContent = head;
-        const sp = document.createElement('span'); sp.textContent = sub;
-        btn.append(hb, sp);
-        btn.addEventListener('click', () => select(e));
-        btn.addEventListener('dblclick', () => vscode.postMessage({ type: 'open', idx: e.idx }));
-        track.append(btn);
+    const list = $('list');
+    list.replaceChildren();
+    if (!data) { list.append(el('div', 'empty', '기록된 세션이 없습니다.')); return; }
+    const turns = data.turns.filter(keep);
+    if (!turns.length) { list.append(el('div', 'empty', filter === 'all' ? '아직 기록이 없습니다.' : '이 조건에 맞는 턴이 없습니다.')); return; }
+    turns.forEach((t, i) => {
+      const id = t.trigger.idx != null ? 'i' + t.trigger.idx : 't' + t.ts;
+      const isOpen = opened.has(id) || (i < 2 && !opened.has('closed:' + id));
+      const card = el('section', 'turn' + (t.trigger.kind === 'message_in' ? ' in' : '') + (isOpen ? ' open' : ''));
+      const head = el('button', 'th'); head.type = 'button'; head.setAttribute('aria-expanded', String(isOpen));
+      head.append(el('span', 'tm', fmt(t.ts) + '\\n' + day(t.ts)));
+      const q = el('span', 'tq');
+      q.append(el('span', 'who', t.trigger.kind === 'message_in' ? '✉ 받은 메시지 · ' + (t.trigger.from || '') : t.trigger.kind === 'prompt' ? '질문' : '세션 시작'));
+      q.append(el('span', 'txt', t.trigger.text || '(내용 없음)'));
+      head.append(q);
+      const st = t.stats; const chips = el('span', 'chips');
+      if (st.bash) chips.append(el('span', 'chip', 'Bash ' + st.bash));
+      if (st.files.length) chips.append(el('span', 'chip edit', '파일 ' + st.files.length + '개 수정'));
+      if (st.out) chips.append(el('span', 'chip msg', '보냄 ' + st.out + (st.blocked ? ' (차단 ' + st.blocked + ')' : '')));
+      if (st.delegates) chips.append(el('span', 'chip msg', '위임 ' + st.delegates));
+      if (st.errors) chips.append(el('span', 'chip err', '실패 ' + st.errors));
+      const other = st.tools - st.bash - st.edits - st.errors;
+      if (other > 0) chips.append(el('span', 'chip', '기타 ' + other));
+      if (!t.items.length) chips.append(el('span', 'chip', '응답만'));
+      head.append(chips);
+      head.addEventListener('click', () => { if (isOpen) { opened.delete(id); opened.add('closed:' + id); } else { opened.add(id); opened.delete('closed:' + id); } render(); });
+      card.append(head);
+      if (isOpen && t.items.length) {
+        const body = el('div', 'tb');
+        const items = filter === 'all' ? t.items : t.items.filter((it) => kindOf(it) === filter);
+        const max = shown.has(id) ? items.length : 40;
+        items.slice(0, max).forEach((it) => {
+          const k = kindOf(it); const [a, b] = label(it);
+          const row = el('button', 'it ' + k + (it.sub ? ' sub' : '')); row.type = 'button';
+          row.title = it.hasDiff ? '전/후 비교 열기' : '자세히 보기';
+          row.append(el('span', 'tm', fmt(it.ts)), el('span', 'k', (it.sub && it.agent ? it.agent + ' · ' : '') + a), el('span', 'v', b));
+          const dkey = 'd' + it.idx;
+          row.addEventListener('click', () => {
+            if (it.hasDiff) { vscode.postMessage({ type: 'open', idx: it.idx }); return; }
+            if (opened.has(dkey)) opened.delete(dkey); else opened.add(dkey);
+            render();
+          });
+          body.append(row);
+          if (opened.has(dkey) && (it.detail || it.summary)) body.append(el('div', 'det', it.detail || it.summary));
+        });
+        if (items.length > max) {
+          const m = el('button', 'it'); m.type = 'button';
+          m.append(el('span'), el('span'), el('span', 'v', '… ' + (items.length - max) + '개 더 보기'));
+          m.addEventListener('click', () => { shown.add(id); render(); });
+          body.append(m);
+        }
+        card.append(body);
       }
-      lane.append(nm, track);
-      $('lanes').append(lane);
-    }
-    lastMaxIdx = maxIdx;
-    if (selected != null) {
-      const e = findEvent(selected);
-      if (e) showDetail(e); else $('detail').hidden = true;
-    }
+      list.append(card);
+    });
   }
 
-  function findEvent(idx) {
-    for (const ln of current.lanes) for (const e of ln.events) if (e.idx === idx) return e;
-    return null;
-  }
-
-  function showDetail(e) {
-    const [head, sub] = label(e);
-    $('detail').hidden = false;
-    $('d-title').textContent = head + '  ' + (e.file || sub) + '  ·  ' + fmt(e.ts);
-    $('d-body').textContent = e.detail || (e.hasDiff ? '"Diff 보기"를 누르면 에디터에서 전/후 비교가 열립니다.' : '(내용 없음)');
-    $('d-open').textContent = e.hasDiff ? 'Diff 보기' : '문서로 열기';
-    $('d-open').onclick = () => vscode.postMessage({ type: 'open', idx: e.idx });
-    $('d-file').hidden = !e.file;
-    $('d-file').onclick = () => vscode.postMessage({ type: 'openFile', file: e.file });
-  }
-
-  function select(e) {
-    selected = e.idx;
+  document.querySelectorAll('.filters button').forEach((b) => b.addEventListener('click', () => {
+    filter = b.dataset.f;
+    document.querySelectorAll('.filters button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
     render();
-    if (e.hasDiff) vscode.postMessage({ type: 'open', idx: e.idx });
-  }
-
-  $('picker').addEventListener('change', (ev) => { selected = null; lastMaxIdx = -1; vscode.postMessage({ type: 'select', id: ev.target.value }); });
+  }));
+  $('picker').addEventListener('change', (e) => { opened.clear(); shown.clear(); vscode.postMessage({ type: 'select', id: e.target.value }); });
 
   window.addEventListener('message', (ev) => {
     const m = ev.data;
     if (m.type !== 'session') return;
-    if (!current || !m.session || current.id !== m.session.id) { selected = null; lastMaxIdx = -1; }
-    current = m.session;
+    if (data && m.session && data.id !== m.session.id) { opened.clear(); shown.clear(); }
+    data = m.session;
+    $('title').textContent = data ? data.title : '기록';
+    $('live').hidden = !(data && data.live);
+    $('meta').textContent = data ? [data.role ? '역할: ' + data.role : null, data.turns.length + '턴 · ' + data.eventCount + ' events' + (data.fileCount ? ' · 수정 파일 ' + data.fileCount + '개' : '')].filter(Boolean).join(' · ') : '';
     const p = $('picker');
-    p.replaceChildren(...m.sessions.map((x) => {
-      const o = document.createElement('option'); o.value = x.id;
-      o.textContent = (x.live ? '● ' : '') + x.title; if (current && x.id === current.id) o.selected = true; return o;
-    }));
+    p.replaceChildren(...(m.sessions || []).map((x) => { const o = document.createElement('option'); o.value = x.id; o.textContent = (x.live ? '● ' : '') + x.title; if (data && x.id === data.id) o.selected = true; return o; }));
     render();
   });
 
