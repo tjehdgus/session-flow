@@ -75,7 +75,8 @@ function buildSessions(events, now = Date.now(), roots = []) {
     // <task-notification>, <command-name> 같은 시스템이 넣은 프롬프트는 제목으로 쓰지 않는다
     if (!s.title && isHumanPrompt(e)) s.title = e.summary;
     if (e.transcript_path && !e.agent_id) s.transcriptPath = e.transcript_path;
-    if (e.kind === 'session_end') s.ended = true;
+    // 다시 켜면(resume) 같은 세션 ID로 종료 → 시작이 이어진다: 마지막 기록이 종료일 때만 종료된 세션
+    s.ended = e.kind === 'session_end';
     // 작업 중 판정용: 마지막 응답 끝(Stop) 이후에 질문·메시지·도구 실행 등 어떤 활동이든 있었는지
     // (다른 세션이 보낸 메시지로 시작한 작업은 질문 기록이 없을 수 있어서 활동 자체를 본다)
     if (e.kind === 'stop' || e.kind === 'session_end') { if (!e.agent_id) s.stopAt = Math.max(s.stopAt || 0, e._t); }

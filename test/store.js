@@ -221,9 +221,14 @@ assert.ok(g3.edges.find((e) => e.from === sub.id && e.to === A));
     ...mk('C', [['stop', 300], ['message_in', 20]]),            // 메시지 받고 다시 일함
     ...mk('D', [['prompt', 3600]]),                             // 오래 아무 기록 없음 (중단 등)
     ...mk('E', [['stop', 200], ['tool', 40], ['message', 10]]), // 질문 기록 없이 메시지로 시작한 작업도 작업 중
+    // 다시 켠 세션: 같은 ID로 종료 → 시작 → 메시지 받고 일함 (실제 h100 기록 모양)
+    ...mk('F', [['stop', 900], ['session_end', 600], ['session_start', 300], ['harness_brief', 300], ['message_in', 60], ['tool', 30]]),
+    ...mk('G', [['tool', 120], ['session_end', 60]]),          // 마지막이 종료면 종료
   ], t, ['/w']);
   const wk = Object.fromEntries(ss.map((x) => [x.id, x.working]));
-  assert.deepStrictEqual(wk, { A: true, B: false, C: true, D: false, E: true });
+  assert.deepStrictEqual(wk, { A: true, B: false, C: true, D: false, E: true, F: true, G: false });
+  assert.strictEqual(ss.find((x) => x.id === 'F').ended, false, '다시 켜면 종료 아님');
+  assert.strictEqual(ss.find((x) => x.id === 'G').ended, true);
   assert.strictEqual(ss.find((x) => x.id === 'B').live, true, 'live(최근 10분)와 working 은 다름');
 }
 
