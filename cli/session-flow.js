@@ -55,13 +55,14 @@ function load() {
   const events = readEvents(eventsFile);
   const sessions = buildSessions(events, Date.now(), [folder]).filter((s) => s.folder === folder);
   const byIdx = new Map(events.map((e) => [e._idx, e])); // _idx 는 buildSessions 가 붙인다
-  const tr = {};
+  const tr = {}, dbgTr = {};
   const guessDir = (cwd) => path.join(os.homedir(), '.claude', 'projects', String(cwd || '').replace(/[^A-Za-z0-9]/g, '-'));
   for (const s of sessions) {
     let p = s.transcriptPath;
     if (!p || !fs.existsSync(p)) p = [guessDir(folder), guessDir(s.cwd)].map((d) => path.join(d, `${s.id}.jsonl`)).find((c) => fs.existsSync(c));
     const info = scanTranscript(p);
     if (info) tr[s.id] = info;
+    dbgTr[s.id] = { ...(info || {}), path: p || s.transcriptPath || '', found: !!info };
   }
   const cfg = harness.load(folder);
   const st = harness.viewState({ folder, cfg, sessions, transcripts: tr, norm });
@@ -72,6 +73,7 @@ function load() {
     Object.assign(a, c);
   }
   st._sessions = sessions;
+  st._tr = dbgTr;
   return st;
 }
 
@@ -87,6 +89,15 @@ function debug() {
     out.push(`  마지막 활동 ${t(s.turnAt)} · 마지막 응답 끝(Stop) ${t(s.stopAt)} · 마지막 기록 ${t(s.end)}${s.ended ? ' · 세션 종료됨' : ''}`);
     const recent = s.events.slice(-10).map((e) => `${t(e._t)} ${e.agent_id ? '(sub) ' : ''}${e.kind}${e.tool ? ':' + e.tool : ''}`);
     out.push('  최근 기록: ' + recent.join(' | '));
+  }
+  // 이 폴더의 모든 세션: 어떤 이름으로 읽히는지, 어느 멤버에 연결됐는지
+  const bySid = Object.fromEntries(st.members.filter((m) => m.sid).map((m) => [m.sid, m.name]));
+  out.push('', `── 이 폴더의 세션 (최근 활동 순, ${st._sessions.length}개) ──`);
+  for (const s of st._sessions.slice().sort((a, b) => b.end - a.end).slice(0, 20)) {
+    const info = st._tr[s.id] || {};
+    const last = s.events[s.events.length - 1];
+    out.push(`  ${s.id.slice(0, 8)}  이름(/rename)=${info.customTitle || '-'}  멤버=${bySid[s.id] || '-'}  기록 ${s.events.length}개  ${t(s.start)}~${t(s.end)}  마지막=${last ? last.kind : '-'}${s.ended ? ' (종료)' : ''}`);
+    out.push(`            대화기록 ${info.path ? (info.found ? '찾음' : '없음') : '경로 모름'}: ${info.path || '-'}`);
   }
   console.log(out.join('\n'));
 }
