@@ -76,8 +76,10 @@ function buildSessions(events, now = Date.now(), roots = []) {
     if (!s.title && isHumanPrompt(e)) s.title = e.summary;
     if (e.transcript_path && !e.agent_id) s.transcriptPath = e.transcript_path;
     if (e.kind === 'session_end') s.ended = true;
-    if (!e.agent_id && (e.kind === 'prompt' || e.kind === 'message_in')) s.turnAt = Math.max(s.turnAt || 0, e._t);
-    if (!e.agent_id && (e.kind === 'stop' || e.kind === 'session_end')) s.stopAt = Math.max(s.stopAt || 0, e._t);
+    // 작업 중 판정용: 마지막 응답 끝(Stop) 이후에 질문·메시지·도구 실행 등 어떤 활동이든 있었는지
+    // (다른 세션이 보낸 메시지로 시작한 작업은 질문 기록이 없을 수 있어서 활동 자체를 본다)
+    if (e.kind === 'stop' || e.kind === 'session_end') { if (!e.agent_id) s.stopAt = Math.max(s.stopAt || 0, e._t); }
+    else if (!['session_start', 'harness_brief'].includes(e.kind)) s.turnAt = Math.max(s.turnAt || 0, e._t);
 
     const key = e.agent_id || 'main';
     let a = s.agents.get(key);
@@ -98,7 +100,7 @@ function buildSessions(events, now = Date.now(), roots = []) {
 
   for (const s of sessions.values()) {
     s.live = !s.ended && now - s.end < LIVE_WINDOW_MS;
-    // 작업 중 = 질문·메시지를 받은 뒤 아직 응답이 끝나지 않음(Stop 전)
+    // 작업 중 = 마지막 응답 끝(Stop) 뒤에 활동이 있고, 그 뒤로 15분 안에 기록이 이어지는 중
     s.working = !s.ended && (s.turnAt || 0) > (s.stopAt || 0) && now - s.end < WORK_IDLE_MS;
     if (!s.title) s.title = `세션 ${s.id.slice(0, 6)}`;
   }

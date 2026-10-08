@@ -2,7 +2,7 @@
   "name": "session-flow",
   "displayName": "Session Flow",
   "description": "열린 작업 폴더의 Claude Code 세션들을 하네스(멤버·역할·메인·메시지 방향)로 설계하고, 실행 흐름과 파일 전/후 변경을 한 화면에서 확인·개입합니다.",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "publisher": "tjehdgus",
   "license": "MIT",
   "repository": {

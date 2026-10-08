@@ -84,7 +84,7 @@ function debug() {
     const s = st._sessions.find((x) => x.id === m.sid);
     out.push('', `■ ${m.name}  세션 ${m.sid ? m.sid.slice(0, 8) : '없음'}  작업 중=${m.working}  최근10분=${m.live}`);
     if (!s) continue;
-    out.push(`  마지막 질문/받은 메시지 ${t(s.turnAt)} · 마지막 응답 끝(Stop) ${t(s.stopAt)} · 마지막 기록 ${t(s.end)}${s.ended ? ' · 세션 종료됨' : ''}`);
+    out.push(`  마지막 활동 ${t(s.turnAt)} · 마지막 응답 끝(Stop) ${t(s.stopAt)} · 마지막 기록 ${t(s.end)}${s.ended ? ' · 세션 종료됨' : ''}`);
     const recent = s.events.slice(-10).map((e) => `${t(e._t)} ${e.agent_id ? '(sub) ' : ''}${e.kind}${e.tool ? ':' + e.tool : ''}`);
     out.push('  최근 기록: ' + recent.join(' | '));
   }

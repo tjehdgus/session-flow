@@ -391,6 +391,9 @@ function activate(context) {
   model.reload();
   const titleTimer = setInterval(() => { try { model.refreshTitles(); } catch { /* ignore */ } }, 5000);
   if (titleTimer.unref) titleTimer.unref();
+  // 작업 중 판정은 시간이 지나면 바뀌므로(응답 끝 기록 없이 멈춘 세션) 1분마다 다시 계산
+  const workTimer = setInterval(() => { if (model.sessions.some((s) => s.working)) model.reload(); }, 60000);
+  if (workTimer.unref) workTimer.unref();
 
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('sessionFlow.sessions', tree),
@@ -408,7 +411,7 @@ function activate(context) {
     vscode.workspace.onDidChangeConfiguration((ev) => { if (ev.affectsConfiguration('sessionFlow.dataDir')) { watch(); model.reload(); } }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => { watch(); model.reload(); }),
     status,
-    { dispose: () => { clearInterval(titleTimer); for (const f of watched) fs.unwatchFile(f); } },
+    { dispose: () => { clearInterval(titleTimer); clearInterval(workTimer); for (const f of watched) fs.unwatchFile(f); } },
   );
 }
 
