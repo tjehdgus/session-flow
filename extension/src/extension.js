@@ -115,7 +115,7 @@ class TreeProvider {
   getTreeItem(node) {
     if (node.type === 'folder') {
       const it = new vscode.TreeItem(`${path.basename(node.folder)} 하네스`, vscode.TreeItemCollapsibleState.Expanded);
-      const live = this.model.sessions.filter((s) => s.folder === node.folder && s.live).length;
+      const live = this.model.sessions.filter((s) => s.folder === node.folder && s.working).length;
       it.description = live ? `● ${live} 작업 중` : '';
       it.tooltip = node.folder;
       it.iconPath = new vscode.ThemeIcon('type-hierarchy');
@@ -126,9 +126,9 @@ class TreeProvider {
     if (node.type === 'session') {
       const m = node.member;
       const it = new vscode.TreeItem(m ? m.name : node.s.displayName, vscode.TreeItemCollapsibleState.Collapsed);
-      it.description = [m && m.main ? '메인' : null, m && !node.named ? '이름 필요' : null, node.s.live ? '● 작업 중' : null, m && m.role ? m.role : `${node.s.events.length} events`].filter(Boolean).join(' · ');
+      it.description = [m && m.main ? '메인' : null, m && !node.named ? '이름 필요' : null, node.s.working ? '● 작업 중' : null, m && m.role ? m.role : `${node.s.events.length} events`].filter(Boolean).join(' · ');
       it.tooltip = [m ? `하네스 멤버 "${m.name}"${m.role ? ` — ${m.role}` : ''}` : '하네스 멤버 아님', m && !node.named ? `세션 이름(/rename)이 아직 "${m.name}"가 아닙니다. 하네스 화면에서 /rename 을 채울 수 있습니다.` : null, `세션: ${node.s.displayName}`, node.s.cwd || '', node.s.id].filter(Boolean).join('\n');
-      it.iconPath = new vscode.ThemeIcon(node.s.live ? 'pulse' : m ? (m.main ? 'star-full' : 'account') : 'history');
+      it.iconPath = new vscode.ThemeIcon(node.s.working ? 'pulse' : m ? (m.main ? 'star-full' : 'account') : 'history');
       it.contextValue = 'session';
       it.command = m
         ? { command: 'sessionFlow.focusMember', title: '이벤트 보기', arguments: [node.s.folder, m.name] }
@@ -316,7 +316,7 @@ function activate(context) {
     const main = cfg && cfg.members.find((m) => m.main);
     const mainSid = main && (harness.resolveMembers(cfg, model.sessions, model.tr)[main.name] || {}).id;
     const items = model.sessions.filter((s) => s.folder === folder && s.activity > 0).sort((a, b) => (b.id === mainSid) - (a.id === mainSid) || b.live - a.live || b.end - a.end)
-      .map((s) => ({ label: s.displayName, description: `${s.id === mainSid ? '메인 · ' : ''}${s.live ? '작업 중 · ' : ''}${s.events.length} events`, sid: s.id }));
+      .map((s) => ({ label: s.displayName, description: `${s.id === mainSid ? '메인 · ' : ''}${s.working ? '작업 중 · ' : ''}${s.events.length} events`, sid: s.id }));
     if (!items.length) { vscode.window.showInformationMessage('이 폴더에 기록된 세션이 없습니다. 세션에서 작업을 시작한 뒤 다시 시도하세요.'); return; }
     const pick = await vscode.window.showQuickPick(items, { title: '어느 세션에게 하네스 작성을 맡길까요?', placeHolder: '역할 분담을 가장 잘 아는 세션 (보통 메인)' });
     if (pick) instruct(pick.sid, '/session-flow:harness');
@@ -369,7 +369,7 @@ function activate(context) {
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
   status.command = 'sessionFlow.openHarness';
   function updateStatus() {
-    const live = model.sessions.filter((s) => s.live).length;
+    const live = model.sessions.filter((s) => s.working).length;
     status.text = `$(type-hierarchy) 하네스${live ? `: ${live} 작업 중` : ''}`;
     status.tooltip = `Session Flow · 기록 위치 ${eventsFile()}`;
     status.show();

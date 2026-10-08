@@ -61,7 +61,7 @@ assert.strictEqual(D.getElementById('add-modal').hidden, true, '추가하면 팝
 // 2) 하네스 있음: 실행 흐름
 const S0 = {
   folder: '/k', name: 'kftc', exists: true, enforce: false, layout: {},
-  members: [member('메인 핸들러', { main: true, live: true, role: '총괄' }), member('GNN', { role: 'GNN 학습', external: { out: 1, in: 1, messages: [{ ts: new Date(now).toISOString(), text: '외부로', dir: 'out', via: '세션 98cfaf' }] }, changedFiles: [{ file: '/k/a.py', edits: 2, first: 3, last: 7, ts: new Date(now).toISOString() }] }), member('RAG 및 LLM'), member('TTA 전문가', { named: false })],
+  members: [member('메인 핸들러', { main: true, live: true, working: true, role: '총괄' }), member('GNN', { role: 'GNN 학습', external: { out: 1, in: 1, messages: [{ ts: new Date(now).toISOString(), text: '외부로', dir: 'out', via: '세션 98cfaf' }] }, changedFiles: [{ file: '/k/a.py', edits: 2, first: 3, last: 7, ts: new Date(now).toISOString() }] }), member('RAG 및 LLM'), member('TTA 전문가', { named: false })],
   edges: [{ from: '메인 핸들러', to: 'GNN' }, { from: '메인 핸들러', to: 'TTA 전문가' }],
   traffic: [
     { from: '메인 핸들러', to: 'GNN', count: 4, last: now, active: true, blocked: 0, ok: true, messages: [msg('메인 핸들러', 'GNN', '학습 시작')] },
@@ -118,7 +118,12 @@ assert.strictEqual(D.getElementById('fix-names').textContent, '이름 맞추기 
 D.getElementById('fix-names').click();
 assert.ok(last('fixNames'));
 assert.strictEqual(D.querySelectorAll('line.el.active').length, 1, '방금 오감');
-assert.strictEqual(D.querySelectorAll('line.el.viol').length, 1, 'GNN→RAG 규칙 밖');
+assert.strictEqual(D.querySelectorAll('line.el.viol').length, 0, '규칙 밖이어도 빨간선 없음');
+assert.ok(![...D.querySelectorAll('text.lbl')].some((t) => t.getAttribute('class').includes('viol')));
+// 작업 중인 멤버만 캐릭터가 일하는 모션(busy), 나머지는 멈춤
+const busy = [...D.querySelectorAll('#fx-chars > g g.busy')];
+assert.strictEqual(busy.length, 1, '작업 중 1명');
+assert.ok(node('메인 핸들러').textContent.includes('● 작업 중') && node('GNN').textContent.includes('대기'));
 assert.strictEqual(D.querySelectorAll('line.el.plan').length, 1, '메인→TTA 아직 안 오감');
 assert.ok([...D.querySelectorAll('text.lbl')].some((t) => t.textContent === '1 · 차단 1'));
 assert.strictEqual(D.getElementById('enf-wrap').hidden, false);
@@ -158,13 +163,16 @@ assert.strictEqual(last('instruct').text, '/rename TTA 전문가');
 // 사이드바에서 멤버를 누르면 그 멤버 이벤트로
 w.dispatchEvent(new w.MessageEvent('message', { data: { type: 'focus', name: 'RAG 및 LLM' } }));
 assert.ok(D.getElementById('side').textContent.startsWith('RAG 및 LLM 이벤트'));
-// 규칙 밖 화살표 → 허용
+// 정하지 않은 방향 화살표 → 차단 건수, 정한 방향으로 추가
 const vh = [...D.querySelectorAll('line.hit')].find((l) => l.textContent.startsWith('GNN → RAG 및 LLM'));
 vh.dispatchEvent(new w.Event('click', { bubbles: true }));
-assert.ok(side().includes('정한 방향(또는 그 답장)이 아닙니다') && side().includes('1건은 차단됐습니다'));
-button('이 방향 허용하기').click();
+assert.ok(side().includes('정하지 않은 방향') && side().includes('1건은 차단됐습니다') && !side().includes('아닙니다'));
+button('정한 방향으로 추가').click();
 assert.deepStrictEqual({ ...last('addRule') }, { type: 'addRule', from: 'GNN', to: 'RAG 및 LLM' });
-assert.strictEqual(D.querySelectorAll('line.el.viol').length, 0, '허용하면 빨강 사라짐');
+// 작업이 끝나면 모션 멈춤
+push({ ...JSON.parse(JSON.stringify(S)), members: S.members.map((m) => ({ ...m, working: false })) });
+assert.strictEqual(D.querySelectorAll('#fx-chars > g g.busy').length, 0, '끝나면 멈춤');
+D.getElementById('m-flow').click();
 
 // 3) 설계 모드
 D.getElementById('m-design').click();
@@ -204,4 +212,4 @@ assert.strictEqual(parseInt(D.getElementById('side').style.width, 10), side0 + 7
 push({ ...S, members: [member('<img src=x onerror=alert(1)>')], edges: [], traffic: [] });
 assert.strictEqual(D.querySelectorAll('#nodes img').length, 0);
 
-console.log('OK — v2 panel: runners/fx toggle, event log (click=log, dblclick=settings, focus), add-session popup, resizable log, empty/drop/rename-add, flow edges (active/plan/viol/blocked), inspector, instruct, diff, design rules, main/remove, XSS-safe');
+console.log('OK — v2 panel: runners/fx toggle, event log (click=log, dblclick=settings, focus), add-session popup, resizable log, empty/drop/rename-add, flow edges (active/plan/blocked, no red), working motion on/off, inspector, instruct, diff, design rules, main/remove, XSS-safe');

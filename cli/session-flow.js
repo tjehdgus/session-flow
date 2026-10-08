@@ -81,6 +81,7 @@ const base = (f) => String(f || '').split(/[\\/]/).pop();
 const key = (s) => String(s || '').trim().toLowerCase();
 
 let S = null, filter = null, seen = null, runners = [];
+const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 function describe(a, me) {
   const inbound = me && (a.kind === 'msg' || a.kind === 'block') && key(a.to) === key(me);
   const k = a.kind === 'msg' && inbound ? 'in' : a.kind;
@@ -94,7 +95,7 @@ function render() {
   const out = [];
   const rule = dim('─'.repeat(W));
   if (!S) { out.push('불러오는 중…'); return out; }
-  const live = S.members.filter((m) => m.live).length;
+  const live = S.members.filter((m) => m.working).length;
   const msgs = S.traffic.reduce((a, t) => a + t.count, 0);
   const title = `${bold(S.name + ' 하네스')}  ${dim(`멤버 ${S.members.length}${live ? ` · 작업 중 ${live}` : ''} · 멤버 간 메시지 ${msgs}`)}`;
   out.push(title + ' '.repeat(Math.max(1, W - width(`${S.name} 하네스  멤버 ${S.members.length}${live ? ` · 작업 중 ${live}` : ''} · 멤버 간 메시지 ${msgs}`) - 8)) + dim(hms(Date.now())));
@@ -109,7 +110,7 @@ function render() {
   for (const m of S.members) {
     const mark = m.main ? yellow('★') : ' ';
     const nm = filter && key(filter) === key(m.name) ? cyan(bold(fit(m.name, nameW))) : bold(fit(m.name, nameW));
-    const status = !m.sid ? red(fit('세션 없음', 10)) : m.live ? green(fit('● 작업 중', 10)) : dim(fit('대기', 10));
+    const status = !m.sid ? red(fit('세션 없음', 10)) : m.working ? green(fit((once ? '●' : SPIN[Math.floor(Date.now() / 120) % SPIN.length]) + ' 작업 중', 10)) : dim(fit('대기', 10));
     const warn = m.sid && !m.named ? red(' 이름 필요') : '';
     out.push(` ${mark} ${nm} ${status} ${fit(m.role || '', roleW - (warn ? 10 : 0))}${warn} ${dim(fit(ago(m.last), 8, false))}`);
   }
@@ -198,6 +199,6 @@ let pending;
 const kick = () => { clearTimeout(pending); pending = setTimeout(() => { refresh(); draw(); }, 200); };
 fs.watchFile(eventsFile, { interval: 1000 }, kick);
 fs.watchFile(harness.configPath(folder), { interval: 1000 }, kick);
-setInterval(() => { if (runners.length) draw(); }, 100);   // 점 이동
+setInterval(() => { if (runners.length || (S && S.members.some((m) => m.working))) draw(); }, 120);   // 점 이동, 작업 중 표시
 setInterval(() => { refresh(); draw(); }, 5000);             // /rename 같은 이름 변경, 시간 표시
 draw();

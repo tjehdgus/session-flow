@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const LIVE_WINDOW_MS = 10 * 60 * 1000;
+const WORK_IDLE_MS = 15 * 60 * 1000; // 응답 중인데 이만큼 아무 기록이 없으면(중단 등) 작업 중으로 보지 않는다
 const QUIET_KINDS = new Set(['session_start', 'session_end', 'stop', 'harness_brief']);
 // 사람이 친 질문이 아니라 IDE/시스템이 자동으로 넣는 프롬프트 (세션 제목으로 쓰지 않음)
 const AUTO_PROMPT = /^\s*(<|continue from where you left off|continue\.?$|resume\b|\[request interrupted)/i;
@@ -75,6 +76,8 @@ function buildSessions(events, now = Date.now(), roots = []) {
     if (!s.title && isHumanPrompt(e)) s.title = e.summary;
     if (e.transcript_path && !e.agent_id) s.transcriptPath = e.transcript_path;
     if (e.kind === 'session_end') s.ended = true;
+    if (!e.agent_id && (e.kind === 'prompt' || e.kind === 'message_in')) s.turnAt = Math.max(s.turnAt || 0, e._t);
+    if (!e.agent_id && (e.kind === 'stop' || e.kind === 'session_end')) s.stopAt = Math.max(s.stopAt || 0, e._t);
 
     const key = e.agent_id || 'main';
     let a = s.agents.get(key);
@@ -95,6 +98,8 @@ function buildSessions(events, now = Date.now(), roots = []) {
 
   for (const s of sessions.values()) {
     s.live = !s.ended && now - s.end < LIVE_WINDOW_MS;
+    // 작업 중 = 질문·메시지를 받은 뒤 아직 응답이 끝나지 않음(Stop 전)
+    s.working = !s.ended && (s.turnAt || 0) > (s.stopAt || 0) && now - s.end < WORK_IDLE_MS;
     if (!s.title) s.title = `세션 ${s.id.slice(0, 6)}`;
   }
   return [...sessions.values()].sort((a, b) => b.end - a.end);

@@ -211,5 +211,20 @@ assert.ok(g3.edges.find((e) => e.from === sub.id && e.to === A));
   assert.strictEqual(r['GNN'].id, 'g1', '이름 맞는 세션이 없으면 저장된 ID');
 }
 
+// 작업 중: 질문/메시지 받은 뒤 Stop 전까지만 (10분 안이라도 Stop 후면 대기)
+{
+  const t = Date.now();
+  const mk = (sid, list) => list.map(([kind, ago], i) => ({ ts: new Date(t - ago * 1000).toISOString(), session_id: sid, cwd: '/w', kind, _i: i }));
+  const ss = buildSessions([
+    ...mk('A', [['prompt', 60], ['tool', 30]]),                 // 응답 중
+    ...mk('B', [['prompt', 120], ['tool', 90], ['stop', 80]]),  // 끝남
+    ...mk('C', [['stop', 300], ['message_in', 20]]),            // 메시지 받고 다시 일함
+    ...mk('D', [['prompt', 3600]]),                             // 오래 아무 기록 없음 (중단 등)
+  ], t, ['/w']);
+  const wk = Object.fromEntries(ss.map((x) => [x.id, x.working]));
+  assert.deepStrictEqual(wk, { A: true, B: false, C: true, D: false });
+  assert.strictEqual(ss.find((x) => x.id === 'B').live, true, 'live(최근 10분)와 working 은 다름');
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log(`OK — transcript incremental + name-first resolve · nodes: ${g.nodes.map((n) => n.label).join(', ')} | edges: ${g.edges.map((e) => `${label(e.from)}→${label(e.to)}(${e.count})`).join(', ')}`);
+console.log(`OK — working state · transcript incremental + name-first resolve · nodes: ${g.nodes.map((n) => n.label).join(', ')} | edges: ${g.edges.map((e) => `${label(e.from)}→${label(e.to)}(${e.count})`).join(', ')}`);

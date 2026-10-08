@@ -121,6 +121,7 @@ function viewState({ folder, cfg, sessions, transcripts, aliases = {}, norm, now
       sid: s ? s.id : null,
       named: !!(s && key(tr.customTitle) === key(m.name)),
       live: !!(s && s.live),
+      working: !!(s && s.working),
       last: s ? s.end : 0,
       eventCount: s ? s.events.length : 0,
       fileCount: s ? s.files.size : 0,
@@ -136,7 +137,7 @@ function viewState({ folder, cfg, sessions, transcripts, aliases = {}, norm, now
     .map((s) => {
       const tr = transcripts[s.id] || {};
       const first = s.events.find((e) => e.kind === 'prompt' && !e.agent_id && !/^\s*(<|continue from where you left off)/i.test(e.summary || ''));
-      return { sid: s.id, name: tr.customTitle || '', label: tr.customTitle || tr.title || s.title, last: s.end, eventCount: s.events.length, live: s.live, firstPrompt: first ? first.summary : '' };
+      return { sid: s.id, name: tr.customTitle || '', label: tr.customTitle || tr.title || s.title, last: s.end, eventCount: s.events.length, live: s.working, firstPrompt: first ? first.summary : '' };
     })
     .sort((a, b) => b.last - a.last);
 

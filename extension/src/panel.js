@@ -133,6 +133,15 @@ function panelHtml() {
   .hammer { display:none; transform-box: fill-box; transform-origin: 30% 100%; }
   .working .hammer { display:inline; animation: swing .32s ease-in-out infinite alternate; }
   @keyframes swing { from { transform: rotate(-55deg); } to { transform: rotate(15deg); } }
+  .laptop, .think { display:none; }
+  .busy .laptop, .busy .think { display:inline; }
+  .busy .breathe { animation: typing .18s ease-in-out infinite alternate; }
+  @keyframes typing { from { transform: translateY(0); } to { transform: translateY(-1.6px); } }
+  .think circle { fill: var(--vscode-foreground); opacity:.25; animation: think 1.2s ease-in-out infinite; }
+  .think .d2 { animation-delay:.2s; } .think .d3 { animation-delay:.4s; }
+  @keyframes think { 30% { opacity:.9; } 60% { opacity:.25; } }
+  .screen { animation: glow 1.6s ease-in-out infinite; }
+  @keyframes glow { 50% { opacity:.45; } }
   .bub rect, .bub path { fill:#f3f1ea; }
   .bub text { font-size:12px; font-weight:600; fill:#1b1e25; }
   .bub.bad rect, .bub.bad path { fill: var(--viol); }
@@ -157,7 +166,7 @@ function panelHtml() {
   .lhead h2 { font-size:12px; font-weight:600; letter-spacing:.03em; opacity:.75; }
   .lhead button { margin-left:auto; }
   .close { margin-left:auto; background:none; padding:2px 6px; opacity:.7; }
-  @media (prefers-reduced-motion: reduce) { .el.active, .node.live, .breathe, .running .leg, .working .hammer, .hop { animation:none; } }
+  @media (prefers-reduced-motion: reduce) { .el.active, .node.live, .breathe, .busy .breathe, .think circle, .screen, .running .leg, .working .hammer, .hop { animation:none; } .think circle { opacity:.7; } }
   @media (max-width: 860px) { .main { flex-direction:column; } .resizer { display:none; } aside, aside.wide { width:auto; max-height:40%; border-left:0; border-top:1px solid var(--line); } .stage { min-height:300px; } }
 </style>
 </head>
@@ -252,12 +261,12 @@ function panelHtml() {
     $('fix-names').title = '하네스 이름과 세션 /rename 이름이 다른 멤버들의 입력창에 /rename 을 채웁니다';
     $('enforce').checked = !!S.enforce;
     $('title').textContent = (S.name || '') + ' 하네스';
-    const live = S.members.filter((m) => m.live).length;
+    const live = S.members.filter((m) => m.working).length;
     const msgs = S.traffic.reduce((a, t) => a + t.count, 0);
     $('stats').textContent = '멤버 ' + S.members.length + (live ? ' · 작업 중 ' + live : '') + ' · 멤버 간 메시지 ' + msgs;
     $('empty').hidden = S.members.length > 0;
     $('legend').replaceChildren(...(mode === 'flow'
-      ? ['━ 정한 방향 + 실제 메시지 수', '┅ 방금 오감', '┈ 정했지만 아직 안 오감', '┅ 빨강: 정한 방향 밖', '클릭: 이벤트 · 더블클릭: 설정']
+      ? ['━ 실제 메시지 수', '┅ 방금 오감', '┈ 정했지만 아직 안 오감', '클릭: 이벤트 · 더블클릭: 설정']
       : ['보내는 세션 → 받는 세션 순서로 누르면 방향이 생깁니다', '화살표를 누르면 지울 수 있습니다']).map((t) => el('span', null, t)));
     $('add-session').textContent = '+ 세션 추가' + (S.tray.length ? ' (' + S.tray.length + ')' : '');
     if (!$('add-modal').hidden) renderAddList();
@@ -310,7 +319,7 @@ function panelHtml() {
     host.replaceChildren();
     for (const m of S.members) {
       const p = pos[m.name] || { x: 0, y: 0 };
-      const b = el('button', 'node' + (m.live ? ' live' : '') + (!m.sid ? ' unresolved' : '') + (sel && (sel.type === 'member' || sel.type === 'log') && key(sel.name) === key(m.name) ? ' sel' : '') + (connectFrom && key(connectFrom) === key(m.name) ? ' connecting' : ''));
+      const b = el('button', 'node' + (m.working ? ' live' : '') + (!m.sid ? ' unresolved' : '') + (sel && (sel.type === 'member' || sel.type === 'log') && key(sel.name) === key(m.name) ? ' sel' : '') + (connectFrom && key(connectFrom) === key(m.name) ? ' connecting' : ''));
       b.type = 'button'; b.dataset.name = m.name;
       b.style.left = (p.x - W / 2) + 'px'; b.style.top = (p.y - NH / 2) + 'px';
       b.title = (m.role ? '역할: ' + m.role + '\\n' : '') + '클릭: 이벤트 · 더블클릭: 설정' + (m.sid ? '' : '\\n연결된 세션을 찾지 못했습니다');
@@ -321,7 +330,7 @@ function panelHtml() {
       if (m.sid && !m.named) t.append(el('span', 'chip need', '이름 필요'));
       b.append(t);
       if (m.role) b.append(el('span', 'r', m.role));
-      b.append(el('span', 's' + (m.live ? ' on' : ''), !m.sid ? '세션을 찾지 못함' : m.live ? '● 작업 중' : '대기 · ' + ago(m.last)));
+      b.append(el('span', 's' + (m.working ? ' on' : ''), !m.sid ? '세션을 찾지 못함' : m.working ? '● 작업 중' : '대기 · ' + ago(m.last)));
       attachNode(b, m);
       host.append(b);
     }
@@ -343,7 +352,7 @@ function panelHtml() {
       seen.add(key(e.from) + '→' + key(e.to));
       out.push(t ? { ...t, planned: true } : { from: e.from, to: e.to, plan: true, count: 0 });
     });
-    S.traffic.forEach((t) => { if (!seen.has(key(t.from) + '→' + key(t.to))) out.push({ ...t, viol: !t.ok }); });
+    S.traffic.forEach((t) => { if (!seen.has(key(t.from) + '→' + key(t.to))) out.push({ ...t }); });
     return out;
   }
 
@@ -423,7 +432,7 @@ function panelHtml() {
   function renderMember(side, m) {
     const head = el('div', 'row'); head.append(el('h2', null, m.name));
     if (m.main) head.append(el('span', 'chip main', '메인'));
-    head.append(el('span', 'chip ' + (m.live ? 'live' : ''), m.live ? '● 작업 중' : m.sid ? '대기 · ' + ago(m.last) : '세션 없음'));
+    head.append(el('span', 'chip ' + (m.working ? 'live' : ''), m.working ? '● 작업 중' : m.sid ? '대기 · ' + ago(m.last) : '세션 없음'));
     side.append(head);
     if (!m.sid) side.append(el('div', 'warn', '"' + m.name + '" 이름을 가진 세션을 이 폴더에서 찾지 못했습니다. 그 세션에서 /rename ' + m.name + ' 을 실행하면 연결됩니다.'));
     else if (!m.named) side.append(el('div', 'warn', '이 세션의 이름(/rename)이 아직 "' + m.name + '"가 아니라서 다른 세션이 이 이름으로 보낼 수 없습니다.'));
@@ -507,10 +516,8 @@ function panelHtml() {
     const t = S.traffic.find((x) => key(x.from) === key(from) && key(x.to) === key(to));
     const back = S.traffic.find((x) => key(x.from) === key(to) && key(x.to) === key(from));
     side.append(el('div', 'muted', (planned ? '정한 방향' : '정하지 않은 방향') + ' · 메시지 ' + (t ? t.count : 0) + '건' + (back ? ' · 반대 ' + back.count + '건' : '')));
-    if (t && !t.ok) {
-      side.append(el('div', 'warn', '하네스에서 정한 방향(또는 그 답장)이 아닙니다.' + (t.blocked ? ' 이 중 ' + t.blocked + '건은 차단됐습니다.' : '')));
-      side.append(btn('이 방향 허용하기', '', () => addRule(from, to)));
-    }
+    if (t && t.blocked) side.append(el('div', 'muted', '이 중 ' + t.blocked + '건은 차단됐습니다.'));
+    if (!planned) side.append(btn('정한 방향으로 추가', '', () => addRule(from, to)));
     const row = el('div', 'row');
     if (planned) row.append(btn('이 방향 지우기', '', () => removeRule(from, to)));
     if (!hasRule(to, from)) row.append(btn('반대 방향도 추가', '', () => addRule(to, from)));
@@ -594,6 +601,13 @@ function panelHtml() {
     SV('path', { d: 'M0 -13 C -1 -19, -4 -21, -9 -21 C -8 -16, -4 -14, 0 -13 Z M0 -13 C 1 -18, 4 -20, 8 -19 C 6 -15, 3 -14, 0 -13 Z', fill: o.ghost ? color : shade(color, 1.25) }, body);
     SV('circle', { class: 'eye', cx: -5, cy: -1, r: 2.3 }, body); SV('circle', { class: 'eye', cx: 5, cy: -1, r: 2.3 }, body);
     SV('circle', { cx: -9, cy: 4, r: 2.2, fill: '#ff7a8a', opacity: 0.45 }, body); SV('circle', { cx: 9, cy: 4, r: 2.2, fill: '#ff7a8a', opacity: 0.45 }, body);
+    // 작업 중: 앞에 노트북, 머리 위에 생각 점 (busy 클래스일 때만 보임)
+    const lap = SV('g', { class: 'laptop' }, hopper);
+    SV('rect', { x: -12, y: 2, width: 24, height: 13, rx: 2, fill: '#2b303a', stroke: '#596273', 'stroke-width': 1 }, lap);
+    SV('rect', { class: 'screen', x: -9.5, y: 4.5, width: 19, height: 8, rx: 1, fill: '#8fc2ff', opacity: 0.85 }, lap);
+    SV('rect', { x: -15, y: 14.5, width: 30, height: 3, rx: 1.5, fill: '#596273' }, lap);
+    const think = SV('g', { class: 'think' }, root);
+    SV('circle', { class: 'd1', cx: -7, cy: -30, r: 2.2 }, think); SV('circle', { class: 'd2', cx: 0, cy: -31.5, r: 2.2 }, think); SV('circle', { class: 'd3', cx: 7, cy: -30, r: 2.2 }, think);
     const ham = SV('g', { class: 'hammer' }, body);
     SV('rect', { x: 15, y: -14, width: 3, height: 17, rx: 1, fill: '#a77b4f' }, ham);
     SV('rect', { x: 10, y: -19, width: 13, height: 7, rx: 1.5, fill: '#9aa3b5' }, ham);
@@ -610,6 +624,7 @@ function panelHtml() {
       let c = chars[m.name];
       if (!c) { const g = SV('g', {}, layer); const inner = SV('g', { transform: 'scale(1.1)' }, g); c = chars[m.name] = { g, color: colorOf(m.name), ...makeChar(colorOf(m.name), inner) }; }
       const a = charAt(m.name); if (a) c.g.setAttribute('transform', 'translate(' + a.x + ',' + a.y + ')');
+      c.root.classList.toggle('busy', !!m.working); // 작업 중이면 노트북 앞에서 타이핑, 끝나면 멈춤
     });
   }
 
