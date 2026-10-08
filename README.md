@@ -135,6 +135,28 @@ claude plugin update session-flow@session-flow
 
 플러그인을 업데이트했으면 열려 있던 Claude Code 세션을 닫았다가 다시 열어야 새 버전이 적용됩니다.
 
+## 터미널에서 보기 (IDE 없이)
+
+SSH 터미널만 있어도 같은 내용을 실시간으로 볼 수 있습니다. 확장과 같은 기록(`~/.session-flow`)과 하네스 파일을 읽습니다.
+
+```bash
+node ~/session-flow/cli/session-flow.js ~/kftc      # 작업 폴더 (생략하면 현재 폴더)
+```
+
+한 번만 등록해 두면 `session-flow`로 바로 실행됩니다.
+
+```bash
+mkdir -p ~/.local/bin && ln -sf ~/session-flow/cli/session-flow.js ~/.local/bin/session-flow
+# ~/.local/bin 이 PATH 에 없으면: echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+cd ~/kftc && session-flow
+```
+
+- 위: 멤버(★ 메인, 작업 중/대기, 역할, 이름 필요, 마지막 활동)
+- 가운데: 많이 오간 방향과 건수, **지금** 오가는 메시지는 점이 보낸 쪽에서 받는 쪽으로 이동
+- 아래: 이벤트(보냄·받음·차단·수정 +/−·위임), 최신이 위, 방금 들어온 줄은 굵게
+- 키: `Tab`/`→` 다음 멤버만 · `←` 이전 · `a` 전체 · `q` 종료
+- `--once`: 한 번 출력하고 끝 (스크립트·로그용), `--no-color`: 색 없이
+
 ## 기록되는 것 (`~/.session-flow`)
 
 | 파일 | 내용 |
