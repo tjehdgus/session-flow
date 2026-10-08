@@ -18,7 +18,7 @@ const harness = require(path.join(SRC, 'harness'));
 // ── 옵션 ──
 const args = process.argv.slice(2);
 if (args.includes('-h') || args.includes('--help')) {
-  console.log('사용법: session-flow [--once] [--no-color] [작업 폴더]\n키: Tab/→ 다음 멤버 · ← 이전 · a 전체 · q 종료');
+  console.log('사용법: session-flow [--once] [--no-color] [--debug] [작업 폴더]\n키: Tab/→ 다음 멤버 · ← 이전 · a 전체 · q 종료');
   process.exit(0);
 }
 const once = args.includes('--once') || !process.stdout.isTTY;
@@ -71,8 +71,26 @@ function load() {
     if (!c) { const e = byIdx.get(a.idx); const d = e && e.tool_use_id ? diffLines(readSnap(e.tool_use_id, 'before'), readSnap(e.tool_use_id, 'after')) : null; c = d ? { add: d.add, del: d.del } : {}; lineCache.set(a.idx, c); }
     Object.assign(a, c);
   }
+  st._sessions = sessions;
   return st;
 }
+
+// --debug: 멤버별 "작업 중" 판정 근거 (최근 기록 종류와 시각)
+function debug() {
+  const st = load();
+  const t = (ms) => (ms ? new Date(ms).toLocaleTimeString([], { hour12: false }) : '-');
+  const out = [`${st.name} 하네스 진단 · 지금 ${t(Date.now())} · 기록 ${eventsFile}`];
+  for (const m of st.members) {
+    const s = st._sessions.find((x) => x.id === m.sid);
+    out.push('', `■ ${m.name}  세션 ${m.sid ? m.sid.slice(0, 8) : '없음'}  작업 중=${m.working}  최근10분=${m.live}`);
+    if (!s) continue;
+    out.push(`  마지막 질문/받은 메시지 ${t(s.turnAt)} · 마지막 응답 끝(Stop) ${t(s.stopAt)} · 마지막 기록 ${t(s.end)}${s.ended ? ' · 세션 종료됨' : ''}`);
+    const recent = s.events.slice(-10).map((e) => `${t(e._t)} ${e.agent_id ? '(sub) ' : ''}${e.kind}${e.tool ? ':' + e.tool : ''}`);
+    out.push('  최근 기록: ' + recent.join(' | '));
+  }
+  console.log(out.join('\n'));
+}
+if (args.includes('--debug')) { debug(); process.exit(0); }
 
 // ── 화면 ──
 const ago = (t) => { if (!t) return ''; const m = Math.round((Date.now() - t) / 60000); return m < 1 ? '방금' : m < 60 ? m + '분 전' : m < 1440 ? Math.round(m / 60) + '시간 전' : Math.round(m / 1440) + '일 전'; };
